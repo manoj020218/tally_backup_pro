@@ -2,10 +2,30 @@ const { ipcMain } = require('electron');
 const { pingTally, getCompanyList } = require('./tally/connector');
 const { BackupEngine } = require('./backup/engine');
 const { getAllBackupProfiles, getBackupProfileById } = require('./db/queries');
+const {
+  validateLicense,
+  validateLicenseOnStartup,
+  revalidateLicenseOnServer,
+  getLicenseStatus
+} = require('./license');
 
 let backupEngine = null;
 
 function registerIpcHandlers(mainWindow) {
+  async function runBackupWithProfileId(profileId) {
+    const profile = getBackupProfileById(profileId);
+    if (!profile) throw new Error('Profile not found');
+
+    if (!backupEngine) {
+      const { getDatabase } = require('./db');
+      const db = getDatabase();
+      backupEngine = new BackupEngine(db);
+    }
+
+    const result = await backupEngine.runBackup(profile);
+    return result;
+  }
+
   // Tally handlers
   ipcMain.handle('tally:ping', async (event, port) => {
     try {
@@ -28,16 +48,23 @@ function registerIpcHandlers(mainWindow) {
   // Backup handlers
   ipcMain.handle('backup:start', async (event, profileId) => {
     try {
-      const profile = getBackupProfileById(profileId);
-      if (!profile) throw new Error('Profile not found');
-      
-      if (!backupEngine) {
-        const { getDatabase } = require('./db');
-        const db = getDatabase();
-        backupEngine = new BackupEngine(db);
+      const result = await runBackupWithProfileId(profileId);
+      mainWindow.webContents.send('backup:complete', result);
+      return result;
+    } catch (error) {
+      mainWindow.webContents.send('backup:error', error.message);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('backup:manual', async (event, options = {}) => {
+    try {
+      const profileId = options.profileId || options.id;
+      if (!profileId) {
+        throw new Error('profileId is required for manual backup');
       }
 
-      const result = await backupEngine.runBackup(profile);
+      const result = await runBackupWithProfileId(profileId);
       mainWindow.webContents.send('backup:complete', result);
       return result;
     } catch (error) {
@@ -82,6 +109,23 @@ function registerIpcHandlers(mainWindow) {
       setSetting(key, String(value));
     });
     return settings;
+  });
+
+  // License handlers
+  ipcMain.handle('license:validate', async (event, licenseKey) => {
+    return validateLicense(licenseKey);
+  });
+
+  ipcMain.handle('license:revalidate', async () => {
+    return revalidateLicenseOnServer();
+  });
+
+  ipcMain.handle('license:validateOnStartup', async () => {
+    return validateLicenseOnStartup();
+  });
+
+  ipcMain.handle('license:status', async () => {
+    return getLicenseStatus();
   });
 }
 

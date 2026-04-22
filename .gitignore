@@ -126,3 +126,7 @@ playwright-report/
 # Electron
 app/dist/
 release/
+
+#lock script
+*.ps1
+*.sh

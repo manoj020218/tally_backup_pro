@@ -1,91 +1,161 @@
-function formatTallyDate(date) {
-  if (!date) return '';
-  try {
-    const d = typeof date === 'string' ? new Date(date) : date;
-    if (isNaN(d.getTime())) throw new Error('Invalid date');
-    return d.toISOString().slice(0, 10).replace(/-/g, '');
-  } catch (error) {
-    throw new Error(\`Invalid date format: \${date}\`);
+function parseInputDate(value) {
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) throw new Error("Invalid date");
+    return new Date(value.getTime());
   }
-}
 
-function getFinancialYear(date) {
-  if (!date) throw new Error('Date is required');
-  try {
-    const d = date instanceof Date ? date : new Date(date);
-    if (isNaN(d.getTime())) throw new Error('Invalid date');
-    
-    const year = d.getFullYear();
-    const month = d.getMonth() + 1;
-    
-    if (month >= 4) {
-      return {
-        from: \`\${year}-04-01\`,
-        to: \`\${year + 1}-03-31\`,
-        year: \`\${year}-\${year + 1}\`
-      };
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+
+    // Tally format: YYYYMMDD
+    if (/^\d{8}$/.test(trimmed)) {
+      const year = Number.parseInt(trimmed.slice(0, 4), 10);
+      const month = Number.parseInt(trimmed.slice(4, 6), 10) - 1;
+      const day = Number.parseInt(trimmed.slice(6, 8), 10);
+      const date = new Date(year, month, day);
+      if (Number.isNaN(date.getTime())) throw new Error("Invalid date");
+      return date;
     }
+
+    // ISO-like or locale-compatible date string
+    const parsed = new Date(trimmed);
+    if (Number.isNaN(parsed.getTime())) throw new Error("Invalid date");
+    return parsed;
+  }
+
+  throw new Error("Invalid date input");
+}
+
+function toISODate(input) {
+  const date = parseInputDate(input);
+  return date.toISOString().slice(0, 10);
+}
+
+function formatTallyDate(input) {
+  const date = parseInputDate(input);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}${month}${day}`;
+}
+
+function addDays(input, days, output = "iso") {
+  if (typeof days !== "number" || !Number.isFinite(days)) {
+    throw new Error("days must be a valid number");
+  }
+
+  const date = parseInputDate(input);
+  date.setDate(date.getDate() + days);
+
+  if (output === "tally") {
+    return formatTallyDate(date);
+  }
+  return toISODate(date);
+}
+
+function getFinancialYear(input) {
+  const date = parseInputDate(input);
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+
+  if (month >= 4) {
     return {
-      from: \`\${year - 1}-04-01\`,
-      to: \`\${year}-03-31\`,
-      year: \`\${year - 1}-\${year}\`
+      from: `${year}-04-01`,
+      to: `${year + 1}-03-31`,
+      year: `${year}-${year + 1}`
     };
-  } catch (error) {
-    throw new Error(\`Failed to get financial year: \${error.message}\`);
   }
+
+  return {
+    from: `${year - 1}-04-01`,
+    to: `${year}-03-31`,
+    year: `${year - 1}-${year}`
+  };
 }
 
-function addDays(dateStr, days) {
-  try {
-    if (!dateStr || typeof days !== 'number') throw new Error('Invalid parameters');
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) throw new Error('Invalid date');
-    date.setDate(date.getDate() + days);
-    return date.toISOString().slice(0, 10);
-  } catch (error) {
-    throw new Error(\`Date calculation failed: \${error.message}\`);
-  }
+function getStartOfWeekMonday(date) {
+  const copy = parseInputDate(date);
+  const day = copy.getDay(); // 0 = Sunday
+  const offset = day === 0 ? -6 : 1 - day;
+  copy.setDate(copy.getDate() + offset);
+  return copy;
 }
 
-function getDateRangePreset(preset, baseDate) {
-  const today = baseDate instanceof Date ? baseDate : new Date(baseDate);
-  if (isNaN(today.getTime())) throw new Error('Invalid date');
+function getEndOfMonth(date) {
+  const copy = parseInputDate(date);
+  return new Date(copy.getFullYear(), copy.getMonth() + 1, 0);
+}
 
-  const ranges = {
-    last7Days: {
-      from: addDays(today.toISOString().slice(0, 10), -7),
-      to: today.toISOString().slice(0, 10)
-    },
-    last30Days: {
-      from: addDays(today.toISOString().slice(0, 10), -30),
-      to: today.toISOString().slice(0, 10)
-    },
-    thisMonth: {
-      from: \`\${today.getFullYear()}-\${String(today.getMonth() + 1).padStart(2, '0')}-01\`,
-      to: today.toISOString().slice(0, 10)
-    },
-    lastMonth: {
-      from: \`\${today.getMonth() === 0 ? today.getFullYear() - 1 : today.getFullYear()}-\${String(today.getMonth() === 0 ? 12 : today.getMonth()).padStart(2, '0')}-01\`,
-      to: \`\${today.getFullYear()}-\${String(today.getMonth() + 1).padStart(2, '0')}-01\`
-    },
-    thisFinancialYear: (() => {
-      const fy = getFinancialYear(today);
-      const toMonth = today.getMonth() + 1;
-      const toDay = today.getDate();
-      return {
-        from: fy.from,
-        to: \`\${today.getFullYear()}-\${String(toMonth).padStart(2, '0')}-\${String(toDay).padStart(2, '0')}\`
-      };
-    })()
+function getDateRangePreset(preset, baseDate = new Date()) {
+  const today = parseInputDate(baseDate);
+  const todayIso = toISODate(today);
+
+  const thisWeekStart = toISODate(getStartOfWeekMonday(today));
+  const thisMonthStart = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-01`;
+
+  const lastMonthDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const lastMonthStart = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, "0")}-01`;
+  const lastMonthEnd = toISODate(getEndOfMonth(lastMonthDate));
+
+  const fy = getFinancialYear(today);
+  const currentFyStartYear = Number.parseInt(fy.from.slice(0, 4), 10);
+  const lastFy = {
+    from: `${currentFyStartYear - 1}-04-01`,
+    to: `${currentFyStartYear}-03-31`
   };
 
-  if (!ranges[preset]) throw new Error(\`Unknown preset: \${preset}\`);
+  const ranges = {
+    today: {
+      from: todayIso,
+      to: todayIso
+    },
+    yesterday: {
+      from: addDays(todayIso, -1),
+      to: addDays(todayIso, -1)
+    },
+    thisWeek: {
+      from: thisWeekStart,
+      to: todayIso
+    },
+    last7Days: {
+      from: addDays(todayIso, -7),
+      to: todayIso
+    },
+    last30Days: {
+      from: addDays(todayIso, -30),
+      to: todayIso
+    },
+    thisMonth: {
+      from: thisMonthStart,
+      to: todayIso
+    },
+    lastMonth: {
+      from: lastMonthStart,
+      to: lastMonthEnd
+    },
+    thisFinancialYear: {
+      from: fy.from,
+      to: todayIso
+    },
+    lastFinancialYear: {
+      from: lastFy.from,
+      to: lastFy.to
+    }
+  };
+
+  if (!ranges[preset]) {
+    throw new Error(`Unknown preset: ${preset}`);
+  }
+
   return ranges[preset];
 }
 
 module.exports = {
+  parseInputDate,
+  toISODate,
   formatTallyDate,
-  getFinancialYear,
   addDays,
+  getFinancialYear,
   getDateRangePreset
 };
+

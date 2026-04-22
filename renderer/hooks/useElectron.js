@@ -6,7 +6,7 @@ export function useElectron() {
   if (!api) {
     console.warn('Electron API not available');
     return {
-      invoke: () => Promise.reject('Electron not available'),
+      invoke: () => Promise.reject(new Error('Electron not available')),
       on: () => () => {}
     };
   }
@@ -18,8 +18,14 @@ export function useIPC() {
   const api = useElectron();
 
   const invoke = useCallback((channel, ...args) => {
-    return api[channel]?.(...args) || Promise.reject(\`Channel \${channel} not found\`);
+    if (typeof api.invoke === 'function') {
+      return api.invoke(channel, ...args);
+    }
+    if (typeof api[channel] === 'function') {
+      return api[channel](...args);
+    }
+    return Promise.reject(new Error(`Channel ${channel} not found`));
   }, [api]);
 
-  return { invoke, on: api.on };
+  return { invoke, on: api.on || (() => () => {}) };
 }
