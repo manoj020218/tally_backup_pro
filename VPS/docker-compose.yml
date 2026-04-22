@@ -1,0 +1,44 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tallybackup-license-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tallybackup_license
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d tallybackup_license"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  license-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tallybackup-license-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      AUTO_MIGRATE: "true"
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/tallybackup_license
+      DB_SSL: "false"
+      JWT_SECRET: replace-with-random-secret
+      JWT_ISSUER: tallybackup-pro-license
+      JWT_AUDIENCE: tallybackup-pro-desktop
+      TOKEN_TTL_HOURS: 168
+      ADMIN_API_KEY: replace-with-admin-key
+    ports:
+      - "8080:8080"
+

@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  tally-backup-pro:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tally-backup-pro
+    restart: unless-stopped
+
+    # Environment variables
+    environment:
+      - NODE_ENV=production
+      - TALLY_HOST=tally-server
+      - TALLY_PORT=9000
+      - DB_PATH=/app/data/tally_backup.db
+      - LOG_LEVEL=info
+
+    # Volumes for persistent data
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+      - ./credentials:/app/credentials:ro
+
+    # Networking
+    networks:
+      - tally-network
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "node", "-e", "console.log('Health check')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: Tally server simulation for development
+  tally-server:
+    image: nginx:alpine
+    container_name: tally-mock-server
+    restart: unless-stopped
+    ports:
+      - "9000:80"
+    volumes:
+      - ./mock-tally:/usr/share/nginx/html
+    networks:
+      - tally-network
+    profiles:
+      - dev
+
+networks:
+  tally-network:
+    driver: bridge
+
+volumes:
+  tally-data:
+    driver: local
+  tally-logs:
+    driver: local
+  tally-backups:
+    driver: local
