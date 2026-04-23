@@ -2,105 +2,54 @@
 
 function getAllBackupProfiles() {
   const db = getDatabase();
-  const stmt = db.prepare('SELECT * FROM backup_profiles WHERE is_active = 1');
-  return stmt.all();
+  const rows = db.prepare('SELECT * FROM backup_profiles WHERE is_active = 1').all();
+  return rows;
 }
 
 function getBackupProfileById(id) {
   const db = getDatabase();
-  const stmt = db.prepare('SELECT * FROM backup_profiles WHERE id = ?');
-  return stmt.get(id);
+  return db.prepare('SELECT * FROM backup_profiles WHERE id = ?').get(id);
 }
 
 function createBackupProfile(profile) {
   const db = getDatabase();
   const stmt = db.prepare(`
-    INSERT INTO backup_profiles 
-    (id, company_id, company_name, name, data_types, schedule_cron, date_range_mode, 
-     custom_from, custom_to, retention_days, local_path, gdrive_enabled, is_active)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO backup_profiles (id, company_id, name, data_types, schedule_cron, date_range_mode, custom_from, custom_to, retention_days, local_path, gdrive_enabled, is_active)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  
-  return stmt.run(
-    profile.id, profile.company_id, profile.company_name, profile.name,
-    JSON.stringify(profile.data_types), profile.schedule_cron, profile.date_range_mode,
-    profile.custom_from, profile.custom_to, profile.retention_days, profile.local_path,
-    profile.gdrive_enabled, 1
-  );
+  const id = require('uuid').v4();
+  stmt.run(id, profile.company_id, profile.name, JSON.stringify(profile.data_types), profile.schedule_cron, profile.date_range_mode, profile.custom_from, profile.custom_to, profile.retention_days, profile.local_path, profile.gdrive_enabled ? 1 : 0, profile.is_active ? 1 : 0);
+  return getBackupProfileById(id);
 }
 
 function updateBackupProfile(id, updates) {
   const db = getDatabase();
-  const fields = Object.keys(updates).map(k => `${k} = ?`).join(', ');
-  const stmt = db.prepare(`UPDATE backup_profiles SET ${fields}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`);
-  return stmt.run(...Object.values(updates), id);
+  const fields = [];
+  const values = [];
+  for (const [key, value] of Object.entries(updates)) {
+    fields.push(`${key} = ?`);
+    values.push(key === 'data_types' ? JSON.stringify(value) : value);
+  }
+  values.push(id);
+  const stmt = db.prepare(`UPDATE backup_profiles SET ${fields.join(', ')} WHERE id = ?`);
+  stmt.run(...values);
+  return getBackupProfileById(id);
 }
 
 function deleteBackupProfile(id) {
   const db = getDatabase();
-  const stmt = db.prepare('DELETE FROM backup_profiles WHERE id = ?');
-  return stmt.run(id);
-}
-
-function getBackupHistory(profileId, limit = 50) {
-  const db = getDatabase();
-  const stmt = db.prepare(`
-    SELECT * FROM backup_runs WHERE profile_id = ? ORDER BY started_at DESC LIMIT ?
-  `);
-  return stmt.all(profileId, limit);
-}
-
-function getAllBackupRuns(limit = 100) {
-  const db = getDatabase();
-  const stmt = db.prepare(`
-    SELECT * FROM backup_runs ORDER BY started_at DESC LIMIT ?
-  `);
-  return stmt.all(limit);
-}
-
-function getBackupState(companyId, dataType, profileId) {
-  const db = getDatabase();
-  const stmt = db.prepare(`
-    SELECT * FROM backup_state WHERE company_id = ? AND data_type = ? AND profile_id = ?
-  `);
-  return stmt.get(companyId, dataType, profileId);
-}
-
-function updateBackupState(companyId, dataType, profileId, state) {
-  const db = getDatabase();
-  const stmt = db.prepare(`
-    INSERT INTO backup_state (company_id, data_type, profile_id, last_from_date, last_to_date, last_run_at, record_count, last_size_kb)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(company_id, data_type, profile_id) DO UPDATE SET
-      last_from_date = excluded.last_from_date,
-      last_to_date = excluded.last_to_date,
-      last_run_at = excluded.last_run_at,
-      record_count = excluded.record_count,
-      last_size_kb = excluded.last_size_kb,
-      updated_at = CURRENT_TIMESTAMP
-  `);
-  
-  return stmt.run(
-    companyId, dataType, profileId,
-    state.last_from_date, state.last_to_date, state.last_run_at,
-    state.record_count, state.last_size_kb
-  );
+  return db.prepare('DELETE FROM backup_profiles WHERE id = ?').run(id);
 }
 
 function getSetting(key) {
   const db = getDatabase();
-  const stmt = db.prepare('SELECT value FROM app_settings WHERE key = ?');
-  const result = stmt.get(key);
-  return result ? result.value : null;
+  const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key);
+  return row ? row.value : null;
 }
 
 function setSetting(key, value) {
   const db = getDatabase();
-  const stmt = db.prepare(`
-    INSERT INTO app_settings (key, value) VALUES (?, ?)
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-  `);
-  return stmt.run(key, value);
+  db.prepare('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)').run(key, value);
 }
 
 module.exports = {
@@ -109,10 +58,6 @@ module.exports = {
   createBackupProfile,
   updateBackupProfile,
   deleteBackupProfile,
-  getBackupHistory,
-  getAllBackupRuns,
-  getBackupState,
-  updateBackupState,
   getSetting,
   setSetting
 };

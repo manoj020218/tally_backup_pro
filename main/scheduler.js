@@ -14,7 +14,7 @@ async function initScheduler(mainWindow) {
       }
     });
 
-    console.log(\`? Scheduler initialized with \${profiles.length} profiles\`);
+    console.log(`Scheduler initialized with ${profiles.length} profiles`);
   } catch (error) {
     console.error('Scheduler initialization failed:', error);
   }
@@ -23,7 +23,7 @@ async function initScheduler(mainWindow) {
 function scheduleBackup(profile, mainWindow) {
   try {
     const job = cron.schedule(profile.schedule_cron, async () => {
-      console.log(\`Running scheduled backup for: \${profile.name}\`);
+      console.log(`Running scheduled backup for: ${profile.name}`);
       
       try {
         const { getDatabase } = require('./db');
@@ -46,9 +46,9 @@ function scheduleBackup(profile, mainWindow) {
     });
 
     scheduledJobs.push({ profileId: profile.id, job });
-    console.log(\`? Scheduled backup for: \${profile.name}\`);
+    console.log(`Scheduled backup for: ${profile.name}`);
   } catch (error) {
-    console.error(\`Failed to schedule backup for \${profile.name}:\`, error);
+    console.error(`Failed to schedule backup for ${profile.name}:`, error);
   }
 }
 
@@ -57,7 +57,7 @@ async function stopScheduler() {
     job.stop();
   });
   scheduledJobs = [];
-  console.log('? Scheduler stopped');
+  console.log('Scheduler stopped');
 }
 
 module.exports = {

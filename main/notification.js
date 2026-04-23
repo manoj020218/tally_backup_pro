@@ -25,7 +25,7 @@ function showNotification(options = {}) {
 function notifyBackupComplete(profile, result) {
   showNotification({
     title: 'Backup Complete',
-    message: \`\${profile.name}: \${result.successCount} succeeded, \${result.failedCount} failed\`,
+    message: `${profile.name}: ${result.successCount} succeeded, ${result.failedCount} failed`,
     type: 'success'
   });
 }
@@ -33,7 +33,7 @@ function notifyBackupComplete(profile, result) {
 function notifyBackupError(profile, error) {
   showNotification({
     title: 'Backup Failed',
-    message: \`\${profile.name}: \${error}\`,
+    message: `${profile.name}: ${error}`,
     type: 'error'
   });
 }
