@@ -1,18 +1,56 @@
 const fs = require("fs").promises;
 const path = require("path");
-const {
-  fetchTallyData,
-  pingTally
-} = require("../tally/connector");
+const { fetchTallyData, pingTally } = require("../tally/connector");
 const {
   resolveDataType,
   isTransactionType,
-  isMasterType
+  isMasterType,
+  isFullFileType
 } = require("../tally/data-types");
 const { formatTallyDate } = require("../tally/xml-builder");
 const { compressToGzip, getFileSize } = require("./compressor");
-const { getLocalBackupPath, cleanupOldBackups } = require("./local-manager");
+const {
+  getLocalBackupPath,
+  cleanupOldBackups,
+  ensureFreeDiskSpace
+} = require("./local-manager");
 const { getLastBackupDate, updateBackupState } = require("./incremental");
+const { runFull900Backup } = require("./full-900");
+const { enqueueBackupJob } = require("./xml-queue");
+const { getSetting } = require("../db/queries");
+
+const FULL_BACKUP_START_DATE = "19000101";
+const DEFAULT_REQUIRED_FREE_BYTES = 50 * 1024 * 1024; // 50 MB
+
+function parseBoolean(value, defaultValue = false) {
+  if (value === undefined || value === null) return defaultValue;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const normalized = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return defaultValue;
+}
+
+function safeGetSetting(key) {
+  try {
+    return getSetting(key);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function normalizeDateRangeMode(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  const allowed = new Set([
+    "full",
+    "incremental",
+    "thisfinancialyear",
+    "lastfinancialyear",
+    "custom"
+  ]);
+  return allowed.has(normalized) ? normalized : "incremental";
+}
 
 function addDays(dateStringYYYYMMDD, days) {
   const value = String(dateStringYYYYMMDD || "");
@@ -26,10 +64,16 @@ function addDays(dateStringYYYYMMDD, days) {
   return formatTallyDate(date);
 }
 
-function getDefaultFromDate() {
-  const today = new Date();
-  const year = today.getMonth() + 1 >= 4 ? today.getFullYear() : today.getFullYear() - 1;
+function getCurrentFinancialYearStart(date = new Date()) {
+  const year = date.getMonth() + 1 >= 4 ? date.getFullYear() : date.getFullYear() - 1;
   return `${year}0401`;
+}
+
+function getLastFinancialYearRange(date = new Date()) {
+  const currentStartYear = date.getMonth() + 1 >= 4 ? date.getFullYear() : date.getFullYear() - 1;
+  const from = `${currentStartYear - 1}0401`;
+  const to = `${currentStartYear}0331`;
+  return { from, to };
 }
 
 function normalizeProfile(profile) {
@@ -48,7 +92,9 @@ function normalizeProfile(profile) {
       : Array.isArray(profile.dataTypes)
       ? profile.dataTypes
       : ["Sales"],
-    dateRangeMode: profile.date_range_mode || profile.dateRangeMode || "incremental",
+    dateRangeMode: normalizeDateRangeMode(
+      profile.date_range_mode || profile.dateRangeMode || "incremental"
+    ),
     customFrom: profile.custom_from || profile.customFrom || "",
     customTo: profile.custom_to || profile.customTo || "",
     localPath: profile.local_path || profile.localPath || path.resolve(process.cwd(), "backups"),
@@ -73,6 +119,22 @@ function validateBackupProfile(profile) {
     errors,
     normalized
   };
+}
+
+async function runPreflightChecks(profile) {
+  const requiredBytes = Math.max(
+    DEFAULT_REQUIRED_FREE_BYTES,
+    Number(profile.dataTypes.length || 1) * 10 * 1024 * 1024
+  );
+  const diskCheck = await ensureFreeDiskSpace(profile.localPath, requiredBytes);
+  if (!diskCheck.ok) {
+    return {
+      ok: false,
+      error: `Insufficient disk space. Required ${requiredBytes} bytes, available ${diskCheck.freeBytes} bytes.`
+    };
+  }
+
+  return { ok: true };
 }
 
 async function writeCompressedBackupFile(targetFilePath, payload) {
@@ -117,6 +179,77 @@ function maybeLogBackupRun(db, profile, status, filePath, fileSizeBytes, errorMe
   }
 }
 
+async function resolveTransactionRange(profile, dataTypeId, context, defaultToDate) {
+  let fromDate = profile.customFrom ? formatTallyDate(profile.customFrom) : getCurrentFinancialYearStart();
+  let toDate = profile.customTo ? formatTallyDate(profile.customTo) : defaultToDate;
+  let effectiveMode = profile.dateRangeMode;
+
+  if (profile.dateRangeMode === "full") {
+    fromDate = FULL_BACKUP_START_DATE;
+    return { fromDate, toDate, effectiveMode: "full" };
+  }
+
+  if (profile.dateRangeMode === "incremental") {
+    if (!profile.customFrom) {
+      const lastToDate = await getLastBackupDate(
+        context.db,
+        profile.companyId || profile.companyName,
+        dataTypeId,
+        profile.id
+      );
+
+      if (lastToDate) {
+        fromDate = addDays(lastToDate, 1) || fromDate;
+      } else {
+        fromDate = FULL_BACKUP_START_DATE;
+        effectiveMode = "full-first-run";
+      }
+    }
+
+    return { fromDate, toDate, effectiveMode };
+  }
+
+  if (profile.dateRangeMode === "thisfinancialyear") {
+    fromDate = getCurrentFinancialYearStart();
+    return { fromDate, toDate, effectiveMode };
+  }
+
+  if (profile.dateRangeMode === "lastfinancialyear") {
+    const lastFy = getLastFinancialYearRange();
+    return {
+      fromDate: lastFy.from,
+      toDate: lastFy.to,
+      effectiveMode
+    };
+  }
+
+  if (profile.dateRangeMode === "custom") {
+    fromDate = profile.customFrom ? formatTallyDate(profile.customFrom) : getCurrentFinancialYearStart();
+    toDate = profile.customTo ? formatTallyDate(profile.customTo) : defaultToDate;
+    return { fromDate, toDate, effectiveMode };
+  }
+
+  return { fromDate, toDate, effectiveMode };
+}
+
+async function maybeRun900Fallback(profile, reason = "manual") {
+  const fallbackEnabled = parseBoolean(safeGetSetting("fallback_900_enabled"), true);
+  const profileRequires900 = profile.dataTypes.some((type) => String(type).toUpperCase() === "FULL_900_BACKUP");
+  if (!fallbackEnabled && !profileRequires900) {
+    return {
+      success: false,
+      skipped: true,
+      error: "Fallback .900 backup is disabled in Settings."
+    };
+  }
+
+  const tallyDataPath = safeGetSetting("tally_data_path") || "";
+  return runFull900Backup(profile, {
+    reason,
+    tallyDataPath
+  });
+}
+
 async function runBackup(profile, context = {}) {
   const validation = validateBackupProfile(profile);
   if (!validation.isValid) {
@@ -129,15 +262,63 @@ async function runBackup(profile, context = {}) {
 
   const normalized = validation.normalized;
   const startTime = new Date();
-  const health = await pingTally(normalized.tallyPort, normalized.tallyHost);
-  if (!health.connected) {
-    const error = `Tally is not reachable: ${health.error || "unknown error"}`;
-    maybeLogBackupRun(context.db, normalized, "failed", "", 0, error);
+
+  const preflight = await runPreflightChecks(normalized);
+  if (!preflight.ok) {
+    maybeLogBackupRun(context.db, normalized, "failed", "", 0, preflight.error);
     return {
       success: false,
       startedAt: startTime.toISOString(),
       completedAt: new Date().toISOString(),
-      error
+      error: preflight.error
+    };
+  }
+
+  const health = await pingTally(normalized.tallyPort, normalized.tallyHost);
+  if (!health.connected) {
+    const queueErrorParts = [];
+    try {
+      enqueueBackupJob({
+        profileId: normalized.id,
+        queuedAt: new Date().toISOString(),
+        reason: "tally_disconnected"
+      });
+    } catch (error) {
+      queueErrorParts.push(`Queue error: ${error.message}`);
+    }
+
+    const fallback = await maybeRun900Fallback(normalized, "tally_disconnected");
+    const queuedMessage = `Tally is not reachable: ${health.error || "unknown error"}. XML backup queued for retry.`;
+    const fallbackMessage =
+      fallback.success
+        ? ` .900 fallback completed (${fallback.files?.length || 0} file(s)).`
+        : fallback.skipped
+        ? ` .900 fallback skipped.`
+        : ` .900 fallback failed: ${fallback.error || "unknown error"}.`;
+
+    const combinedError = [queuedMessage + fallbackMessage, ...queueErrorParts].join(" ");
+    const fallbackFirstFile = Array.isArray(fallback.files) && fallback.files.length > 0
+      ? fallback.files[0].filePath
+      : "";
+    const fallbackTotalBytes = Number(fallback.totalBytes || 0);
+
+    maybeLogBackupRun(
+      context.db,
+      normalized,
+      fallback.success ? "queued" : "failed",
+      fallbackFirstFile,
+      fallbackTotalBytes,
+      combinedError
+    );
+
+    return {
+      success: Boolean(fallback.success),
+      queued: true,
+      status: fallback.success ? "queued" : "failed",
+      startedAt: startTime.toISOString(),
+      completedAt: new Date().toISOString(),
+      error: combinedError,
+      fallback900: fallback
     };
   }
 
@@ -160,21 +341,78 @@ async function runBackup(profile, context = {}) {
       continue;
     }
 
-    try {
-      let fromDate = normalized.customFrom ? formatTallyDate(normalized.customFrom) : getDefaultFromDate();
-      if (normalized.dateRangeMode === "incremental" && isTransactionType(typeDefinition)) {
-        const lastToDate = await getLastBackupDate(
-          context.db,
-          normalized.companyId || normalized.companyName,
-          typeDefinition.id,
-          normalized.id
-        );
-        if (lastToDate) {
-          fromDate = addDays(lastToDate, 1) || fromDate;
+    if (isFullFileType(typeDefinition)) {
+      try {
+        const fullResult = await maybeRun900Fallback(normalized, "profile_full_900");
+        if (!fullResult.success) {
+          throw new Error(fullResult.error || "Unable to complete .900 full backup.");
         }
+
+        const firstFile = Array.isArray(fullResult.files) ? fullResult.files[0] : null;
+        totalSizeBytes += Number(fullResult.totalBytes || 0);
+        successCount += 1;
+        results.push({
+          dataType: typeDefinition.id,
+          effectiveMode: "full-900-file",
+          success: true,
+          recordCount: Number(fullResult.files?.length || 0),
+          fromDate: "",
+          toDate,
+          filePath: firstFile ? firstFile.filePath : "",
+          size: {
+            bytes: Number(fullResult.totalBytes || 0),
+            kb: Math.ceil(Number(fullResult.totalBytes || 0) / 1024),
+            mb: Number((Number(fullResult.totalBytes || 0) / (1024 * 1024)).toFixed(2))
+          }
+        });
+      } catch (error) {
+        failedCount += 1;
+        results.push({
+          dataType: typeDefinition.id,
+          success: false,
+          error: error.message
+        });
+      }
+      continue;
+    }
+
+    try {
+      let fromDate = FULL_BACKUP_START_DATE;
+      let effectiveToDate = toDate;
+      let effectiveMode = normalized.dateRangeMode;
+
+      if (isTransactionType(typeDefinition)) {
+        const range = await resolveTransactionRange(
+          normalized,
+          typeDefinition.id,
+          context,
+          toDate
+        );
+        fromDate = range.fromDate;
+        effectiveToDate = range.toDate;
+        effectiveMode = range.effectiveMode;
+      } else if (isMasterType(typeDefinition)) {
+        // Tally master data is always exported in full.
+        fromDate = FULL_BACKUP_START_DATE;
+        effectiveToDate = toDate;
+        effectiveMode = "full-master";
       }
 
-      const effectiveToDate = normalized.customTo ? formatTallyDate(normalized.customTo) : toDate;
+      if (String(fromDate) > String(effectiveToDate)) {
+        successCount += 1;
+        results.push({
+          dataType: typeDefinition.id,
+          effectiveMode,
+          success: true,
+          recordCount: 0,
+          fromDate,
+          toDate: effectiveToDate,
+          skipped: true,
+          reason: "already_up_to_date"
+        });
+        continue;
+      }
+
       const parsed = await fetchTallyData({
         dataType: typeDefinition.id,
         companyName: normalized.companyName,
@@ -189,10 +427,7 @@ async function runBackup(profile, context = {}) {
 
       if (recordCount > 0) {
         const safeType = String(typeDefinition.id).replace(/[^a-zA-Z0-9_-]/g, "_");
-        const outputFile = path.join(
-          backupDir,
-          `${safeType}_${fromDate}_${effectiveToDate}.json.gz`
-        );
+        const outputFile = path.join(backupDir, `${safeType}_${fromDate}_${effectiveToDate}.json.gz`);
 
         const payload = {
           meta: {
@@ -222,6 +457,7 @@ async function runBackup(profile, context = {}) {
 
         results.push({
           dataType: typeDefinition.id,
+          effectiveMode,
           success: true,
           recordCount,
           fromDate,
@@ -242,6 +478,7 @@ async function runBackup(profile, context = {}) {
 
         results.push({
           dataType: typeDefinition.id,
+          effectiveMode,
           success: true,
           recordCount: 0,
           fromDate,
@@ -309,4 +546,3 @@ module.exports = {
   runBackup,
   validateBackupProfile
 };
-

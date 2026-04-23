@@ -1,130 +1,286 @@
-const { ipcMain } = require('electron');
-const { pingTally, getCompanyList } = require('./tally/connector');
-const { BackupEngine } = require('./backup/engine');
-const { getAllBackupProfiles, getBackupProfileById } = require('./db/queries');
+const fs = require("fs").promises;
+const path = require("path");
+const { app, ipcMain, shell } = require("electron");
+const { pingTally, getCompanyList } = require("./tally/connector");
+const { BackupEngine } = require("./backup/engine");
+const { estimateBackupSize } = require("./backup/size-estimator");
+const {
+  getAllBackupProfiles,
+  getBackupProfileById,
+  getBackupRuns,
+  getSetting,
+  setSetting
+} = require("./db/queries");
 const {
   validateLicense,
   validateLicenseOnStartup,
   revalidateLicenseOnServer,
   getLicenseStatus
-} = require('./license');
+} = require("./license");
 
 let backupEngine = null;
 
-function registerIpcHandlers(mainWindow) {
-  async function runBackupWithProfileId(profileId) {
-    const profile = getBackupProfileById(profileId);
-    if (!profile) throw new Error('Profile not found');
+function parseBoolean(value, defaultValue = false) {
+  if (value === undefined || value === null) return defaultValue;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const normalized = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return defaultValue;
+}
 
-    if (!backupEngine) {
-      const { getDatabase } = require('./db');
-      const db = getDatabase();
-      backupEngine = new BackupEngine(db);
-    }
+function parseInteger(value, defaultValue) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) ? parsed : defaultValue;
+}
 
-    const result = await backupEngine.runBackup(profile);
-    return result;
+function normalizeSettingsPayload(settings = {}) {
+  return {
+    tally_port: String(parseInteger(settings.tallyPort, 9000)),
+    tally_data_path: String(settings.tallyDataPath || "").trim(),
+    gdrive_folder_id: String(settings.gdriveFolderId || "").trim(),
+    auto_sync: parseBoolean(settings.autoSync, true) ? "1" : "0",
+    notifications: parseBoolean(settings.notifications, true) ? "1" : "0",
+    fallback_900_enabled: parseBoolean(settings.fallback900Enabled, true) ? "1" : "0",
+    start_on_boot: parseBoolean(settings.startOnBoot, true) ? "1" : "0",
+    update_channel: String(settings.updateChannel || "stable").trim().toLowerCase() || "stable"
+  };
+}
+
+function mapSettingsFromStore() {
+  const loginSettings = app.getLoginItemSettings();
+  const startOnBootSetting = getSetting("start_on_boot");
+  const resolvedStartOnBoot =
+    startOnBootSetting === null
+      ? Boolean(loginSettings.openAtLogin)
+      : parseBoolean(startOnBootSetting, true);
+
+  return {
+    tallyPort: parseInteger(getSetting("tally_port"), 9000),
+    tallyDataPath: getSetting("tally_data_path") || "",
+    gdriveFolderId: getSetting("gdrive_folder_id") || "",
+    autoSync: parseBoolean(getSetting("auto_sync"), true),
+    notifications: parseBoolean(getSetting("notifications"), true),
+    fallback900Enabled: parseBoolean(getSetting("fallback_900_enabled"), true),
+    startOnBoot: resolvedStartOnBoot,
+    updateChannel: getSetting("update_channel") || "stable",
+    appVersion: app.getVersion(),
+    isPackaged: app.isPackaged
+  };
+}
+
+function mergeProfileOverrides(baseProfile, options = {}) {
+  const overrides = options && typeof options === "object" ? options.overrides || {} : {};
+  const merged = { ...baseProfile };
+
+  if (Array.isArray(overrides.data_types)) {
+    merged.data_types = overrides.data_types;
+  } else if (Array.isArray(overrides.dataTypes)) {
+    merged.data_types = overrides.dataTypes;
   }
 
+  if (overrides.date_range_mode !== undefined) {
+    merged.date_range_mode = overrides.date_range_mode;
+  } else if (overrides.dateRangeMode !== undefined) {
+    merged.date_range_mode = overrides.dateRangeMode;
+  }
+
+  if (overrides.custom_from !== undefined) {
+    merged.custom_from = overrides.custom_from;
+  } else if (overrides.customFrom !== undefined) {
+    merged.custom_from = overrides.customFrom;
+  }
+
+  if (overrides.custom_to !== undefined) {
+    merged.custom_to = overrides.custom_to;
+  } else if (overrides.customTo !== undefined) {
+    merged.custom_to = overrides.customTo;
+  }
+
+  return merged;
+}
+
+function toCsv(rows = []) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return "profile_name,backup_type,status,started_at,completed_at,file_size,file_path,error_log\n";
+  }
+
+  const headers = [
+    "profile_name",
+    "backup_type",
+    "status",
+    "started_at",
+    "completed_at",
+    "file_size",
+    "file_path",
+    "error_log"
+  ];
+
+  function escapeCell(value) {
+    const raw = String(value ?? "");
+    if (/[",\n]/.test(raw)) {
+      return `"${raw.replace(/"/g, "\"\"")}"`;
+    }
+    return raw;
+  }
+
+  const lines = [headers.join(",")];
+  rows.forEach((row) => {
+    const line = headers.map((header) => escapeCell(row[header] ?? row[header.toLowerCase()] ?? "")).join(",");
+    lines.push(line);
+  });
+
+  return `${lines.join("\n")}\n`;
+}
+
+async function runBackupWithProfileId(profileId, options = {}) {
+  const profile = getBackupProfileById(profileId);
+  if (!profile) throw new Error("Profile not found");
+
+  const effectiveProfile = mergeProfileOverrides(profile, options);
+
+  if (!backupEngine) {
+    const { getDatabase } = require("./db");
+    const db = getDatabase();
+    backupEngine = new BackupEngine(db);
+  }
+
+  return backupEngine.runBackup(effectiveProfile);
+}
+
+function registerIpcHandlers(mainWindow) {
   // Tally handlers
-  ipcMain.handle('tally:ping', async (event, port) => {
+  ipcMain.handle("tally:ping", async (_event, port) => {
     try {
-      const result = await pingTally(port);
-      return result;
+      return await pingTally(port);
     } catch (error) {
       return { connected: false, error: error.message };
     }
   });
 
-  ipcMain.handle('tally:getCompanies', async (event, port) => {
+  ipcMain.handle("tally:getCompanies", async (_event, port) => {
     try {
-      const companies = await getCompanyList(port);
-      return companies;
+      return await getCompanyList(port);
     } catch (error) {
       return { error: error.message };
     }
   });
 
   // Backup handlers
-  ipcMain.handle('backup:start', async (event, profileId) => {
+  ipcMain.handle("backup:start", async (_event, profileId) => {
     try {
       const result = await runBackupWithProfileId(profileId);
-      mainWindow.webContents.send('backup:complete', result);
+      mainWindow.webContents.send("backup:complete", result);
       return result;
     } catch (error) {
-      mainWindow.webContents.send('backup:error', error.message);
+      mainWindow.webContents.send("backup:error", error.message);
       throw error;
     }
   });
 
-  ipcMain.handle('backup:manual', async (event, options = {}) => {
+  ipcMain.handle("backup:manual", async (_event, options = {}) => {
     try {
       const profileId = options.profileId || options.id;
       if (!profileId) {
-        throw new Error('profileId is required for manual backup');
+        throw new Error("profileId is required for manual backup");
       }
 
-      const result = await runBackupWithProfileId(profileId);
-      mainWindow.webContents.send('backup:complete', result);
+      const result = await runBackupWithProfileId(profileId, options);
+      mainWindow.webContents.send("backup:complete", result);
       return result;
     } catch (error) {
-      mainWindow.webContents.send('backup:error', error.message);
+      mainWindow.webContents.send("backup:error", error.message);
       throw error;
     }
   });
 
-  // Profile handlers
-  ipcMain.handle('profiles:getAll', async () => {
-    return getAllBackupProfiles();
+  ipcMain.handle("backup:estimate", async (_event, profile = {}) => {
+    try {
+      return await estimateBackupSize(profile);
+    } catch (error) {
+      throw new Error(error.message);
+    }
   });
 
-  ipcMain.handle('profiles:create', async (event, profile) => {
-    const { createBackupProfile } = require('./db/queries');
+  ipcMain.handle("runs:getAll", async (_event, limit = 200) => {
+    return getBackupRuns(limit);
+  });
+
+  // Profile handlers
+  ipcMain.handle("profiles:getAll", async () => getAllBackupProfiles());
+
+  ipcMain.handle("profiles:create", async (_event, profile) => {
+    const { createBackupProfile } = require("./db/queries");
     return createBackupProfile(profile);
   });
 
-  ipcMain.handle('profiles:update', async (event, id, updates) => {
-    const { updateBackupProfile } = require('./db/queries');
+  ipcMain.handle("profiles:update", async (_event, id, updates) => {
+    const { updateBackupProfile } = require("./db/queries");
     return updateBackupProfile(id, updates);
   });
 
-  ipcMain.handle('profiles:delete', async (event, id) => {
-    const { deleteBackupProfile } = require('./db/queries');
+  ipcMain.handle("profiles:delete", async (_event, id) => {
+    const { deleteBackupProfile } = require("./db/queries");
     return deleteBackupProfile(id);
   });
 
-  // Settings handlers
-  ipcMain.handle('settings:get', async () => {
-    const { getSetting } = require('./db/queries');
+  // Restore / export handlers
+  ipcMain.handle("restore:openInFolder", async (_event, filePath) => {
+    const target = String(filePath || "").trim();
+    if (!target) throw new Error("filePath is required.");
+    shell.showItemInFolder(path.normalize(target));
+    return { success: true };
+  });
+
+  ipcMain.handle("restore:exportCsv", async (_event, rows = [], options = {}) => {
+    const docsPath = app.getPath("documents");
+    const exportDir = path.join(docsPath, "TallyBackupExports");
+    await fs.mkdir(exportDir, { recursive: true });
+
+    const suffix = new Date().toISOString().replace(/[:.]/g, "-");
+    const preferredName = String(options.fileName || "").trim().replace(/[^a-zA-Z0-9._-]/g, "_");
+    const fileName = preferredName || `backup_export_${suffix}.csv`;
+    const targetPath = path.join(exportDir, fileName);
+
+    await fs.writeFile(targetPath, toCsv(rows), "utf8");
     return {
-      tallyPort: getSetting('tally_port') || '9000',
-      notifyOnSuccess: getSetting('notify_on_success') === '1',
-      notifyOnFailure: getSetting('notify_on_failure') === '1'
+      success: true,
+      path: targetPath
     };
   });
 
-  ipcMain.handle('settings:update', async (event, settings) => {
-    const { setSetting } = require('./db/queries');
-    Object.entries(settings).forEach(([key, value]) => {
-      setSetting(key, String(value));
+  // Settings handlers
+  ipcMain.handle("settings:get", async () => mapSettingsFromStore());
+
+  ipcMain.handle("settings:update", async (_event, settings) => {
+    const normalized = normalizeSettingsPayload(settings);
+    Object.entries(normalized).forEach(([key, value]) => {
+      setSetting(key, value);
     });
-    return settings;
+
+    app.setLoginItemSettings({
+      openAtLogin: normalized.start_on_boot === "1",
+      path: app.getPath("exe")
+    });
+
+    return mapSettingsFromStore();
   });
 
   // License handlers
-  ipcMain.handle('license:validate', async (event, licenseKey) => {
+  ipcMain.handle("license:validate", async (_event, licenseKey) => {
     return validateLicense(licenseKey);
   });
 
-  ipcMain.handle('license:revalidate', async () => {
+  ipcMain.handle("license:revalidate", async () => {
     return revalidateLicenseOnServer();
   });
 
-  ipcMain.handle('license:validateOnStartup', async () => {
+  ipcMain.handle("license:validateOnStartup", async () => {
     return validateLicenseOnStartup();
   });
 
-  ipcMain.handle('license:status', async () => {
+  ipcMain.handle("license:status", async () => {
     return getLicenseStatus();
   });
 }

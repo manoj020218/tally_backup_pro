@@ -1,8 +1,13 @@
-const { autoUpdater } = require('electron-updater');
-const { dialog } = require('electron');
+const { app, dialog } = require('electron');
 
 function initUpdater(mainWindow) {
+  if (!app || !app.isPackaged) {
+    console.log('Auto-updater skipped (development/unpackaged mode)');
+    return;
+  }
+
   try {
+    const { autoUpdater } = require('electron-updater');
     autoUpdater.checkForUpdatesAndNotify();
 
     autoUpdater.on('update-available', () => {
@@ -26,7 +31,7 @@ function initUpdater(mainWindow) {
       console.error('Auto-update error:', error);
     });
 
-    console.log('? Auto-updater initialized');
+    console.log('Auto-updater initialized');
   } catch (error) {
     console.error('Failed to initialize updater:', error);
   }

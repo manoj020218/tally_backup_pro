@@ -7,9 +7,9 @@
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
-    "start": "electron .",
+    "start": "node scripts/start-electron.js",
     "dev": "vite",
-    "dev:electron": "cross-env NODE_ENV=development electron .",
+    "dev:electron": "cross-env NODE_ENV=development node scripts/start-electron.js",
     "build:renderer": "vite build",
     "build:electron": "electron-builder",
     "build": "npm run build:renderer && npm run build:electron",
@@ -68,4 +68,3 @@
     "extends": "electron-builder.yml"
   }
 }
-

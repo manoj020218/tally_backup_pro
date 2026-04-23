@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu } = require('electron');
 const path = require('path');
 const { initDatabase } = require('./db');
 const { createTray } = require('./tray');
@@ -6,16 +6,31 @@ const { registerIpcHandlers } = require('./ipc-handlers');
 const { initScheduler } = require('./scheduler');
 const { initUpdater } = require('./updater');
 const { validateLicenseOnStartup } = require('./license');
+const { getSetting } = require('./db/queries');
 
 let mainWindow = null;
 let tray = null;
 
+function parseBoolean(value, defaultValue = false) {
+  if (value === undefined || value === null) return defaultValue;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const normalized = String(value).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return defaultValue;
+}
+
 // Enable live reload in development
 if (process.env.NODE_ENV === 'development') {
-  require('electron-reload')(__dirname, {
-    electron: path.join(__dirname, '..', 'node_modules', '.bin', 'electron'),
-    hardResetMethod: 'exit'
-  });
+  try {
+    require('electron-reload')(__dirname, {
+      electron: path.join(__dirname, '..', 'node_modules', '.bin', 'electron'),
+      hardResetMethod: 'exit'
+    });
+  } catch (_error) {
+    console.warn('electron-reload not installed; continuing without live reload');
+  }
 }
 
 async function createWindow() {
@@ -39,7 +54,7 @@ async function createWindow() {
   const isDev = process.env.NODE_ENV === 'development';
   const indexPath = isDev
     ? 'http://localhost:5173'
-    : `file://${path.join(__dirname, '../dist/index.html')}`;
+    : `file://${path.join(__dirname, '../renderer/dist/index.html')}`;
 
   await mainWindow.loadURL(indexPath);
 
@@ -64,8 +79,8 @@ app.whenReady().then(async () => {
   await initDatabase();
   
   // Validate license
-  const isValid = await validateLicenseOnStartup();
-  if (!isValid) {
+  const licenseResult = await validateLicenseOnStartup();
+  if (!licenseResult || licenseResult.valid === false) {
     console.log('License validation failed');
   }
   
@@ -76,7 +91,7 @@ app.whenReady().then(async () => {
   tray = createTray(mainWindow);
   
   // Register IPC handlers
-  registerIpcHandlers(ipcMain, mainWindow);
+  registerIpcHandlers(mainWindow);
   
   // Initialize scheduler
   await initScheduler(mainWindow);
@@ -85,8 +100,9 @@ app.whenReady().then(async () => {
   initUpdater(mainWindow);
   
   // Set auto-start on boot
+  const startOnBoot = parseBoolean(getSetting('start_on_boot'), true);
   app.setLoginItemSettings({
-    openAtLogin: true,
+    openAtLogin: startOnBoot,
     path: app.getPath('exe')
   });
 });

@@ -49,6 +49,11 @@ function isIncrementalType(dataType) {
   return Boolean(resolved && resolved.incremental);
 }
 
+function isFullFileType(dataType) {
+  const resolved = typeof dataType === "object" && dataType ? dataType : resolveDataType(dataType);
+  return Boolean(resolved && resolved.category === "full");
+}
+
 module.exports = {
   TRANSACTION_DATA_TYPES,
   MASTER_DATA_TYPES,
@@ -57,6 +62,6 @@ module.exports = {
   resolveDataType,
   isTransactionType,
   isMasterType,
-  isIncrementalType
+  isIncrementalType,
+  isFullFileType
 };
-

@@ -34,5 +34,19 @@ export function useBackup() {
     }
   }, [invoke]);
 
-  return { startBackup, manualBackup, loading, error };
+  const estimateBackup = useCallback(async (profile) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await invoke("estimateBackup", profile);
+      return result;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [invoke]);
+
+  return { startBackup, manualBackup, estimateBackup, loading, error };
 }

@@ -78,9 +78,42 @@ async function cleanupOldBackups(basePath, retentionDays) {
   }
 }
 
+async function getAvailableDiskBytes(targetPath) {
+  const resolved = path.resolve(String(targetPath || process.cwd()));
+  await fs.mkdir(resolved, { recursive: true });
+
+  if (typeof fs.statfs !== "function") {
+    // Conservative fallback for older Node runtimes without statfs.
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  const stats = await fs.statfs(resolved);
+  const blockSize = Number(stats.bsize || 0);
+  const availableBlocks = Number(stats.bavail || stats.bfree || 0);
+
+  if (!Number.isFinite(blockSize) || !Number.isFinite(availableBlocks)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.floor(blockSize * availableBlocks));
+}
+
+async function ensureFreeDiskSpace(targetPath, requiredBytes) {
+  const required = Math.max(0, Number(requiredBytes || 0));
+  const freeBytes = await getAvailableDiskBytes(targetPath);
+
+  return {
+    freeBytes,
+    requiredBytes: required,
+    ok: freeBytes >= required
+  };
+}
+
 module.exports = {
   sanitizePathSegment,
   ensureDirectory,
   getLocalBackupPath,
-  cleanupOldBackups
+  cleanupOldBackups,
+  getAvailableDiskBytes,
+  ensureFreeDiskSpace
 };
