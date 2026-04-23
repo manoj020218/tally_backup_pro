@@ -51,9 +51,20 @@ const DEFAULT_FORM = {
   schedule: "daily",
   dataTypes: ["Sales"],
   is_active: true,
+  gdriveEnabled: false,
   localPath: "",
   retentionDays: 30
 };
+
+function parseBoolean(value, defaultValue = false) {
+  if (value === undefined || value === null) return defaultValue;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const normalized = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off", ""].includes(normalized)) return false;
+  return defaultValue;
+}
 
 function toFormData(profile = {}) {
   return {
@@ -68,6 +79,12 @@ function toFormData(profile = {}) {
     customFrom: profile.customFrom || profile.custom_from || "",
     customTo: profile.customTo || profile.custom_to || "",
     is_active: profile.is_active !== undefined ? Boolean(profile.is_active) : true,
+    gdriveEnabled:
+      profile.gdriveEnabled !== undefined
+        ? parseBoolean(profile.gdriveEnabled, false)
+        : profile.gdrive_enabled !== undefined
+        ? parseBoolean(profile.gdrive_enabled, false)
+        : false,
     retentionDays: Number.parseInt(profile.retentionDays || profile.retention_days || "30", 10) || 30
   };
 }
@@ -91,7 +108,7 @@ function toDbPayload(formData = {}) {
     custom_to: dateRangeMode === "custom" ? String(formData.customTo || "").trim() : null,
     retention_days: Number.isFinite(retentionDays) ? Math.max(1, retentionDays) : 30,
     local_path: String(formData.localPath || "").trim(),
-    gdrive_enabled: false,
+    gdrive_enabled: Boolean(formData.gdriveEnabled),
     is_active: formData.is_active !== false
   };
 }
@@ -536,6 +553,20 @@ export default function BackupProfiles() {
               </label>
             </div>
 
+            <div className="flex items-center">
+              <label className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={Boolean(formData.gdriveEnabled)}
+                  onChange={(event) =>
+                    setFormData((prev) => ({ ...prev, gdriveEnabled: event.target.checked }))
+                  }
+                  className="mr-2"
+                />
+                Sync this profile to Google Drive
+              </label>
+            </div>
+
             <div className="col-span-2">
               <label className="block text-sm font-medium mb-2">Selective Voucher / Master Data</label>
               <div className="grid grid-cols-3 gap-2">
@@ -612,6 +643,10 @@ export default function BackupProfiles() {
                         />
                         <StatusBadge status="info" text={formatModeLabel(profile.dateRangeMode || profile.backupType)} />
                         <StatusBadge status="info" text={profile.schedule} />
+                        <StatusBadge
+                          status={profile.gdriveEnabled ? "success" : "warning"}
+                          text={profile.gdriveEnabled ? "Drive Sync On" : "Drive Sync Off"}
+                        />
                       </div>
                     </div>
                     <div className="flex gap-2">

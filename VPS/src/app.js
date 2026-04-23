@@ -1,4 +1,5 @@
 const express = require("express");
+const path = require("path");
 const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
@@ -21,11 +22,30 @@ const {
 } = require("./adminService");
 
 const app = express();
+const publicDir = path.resolve(__dirname, "..", "site");
 
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 app.use(morgan(config.isProduction ? "combined" : "dev"));
+app.use("/static", express.static(publicDir));
+
+function sendPublicPage(fileName) {
+  return (_req, res) => {
+    res.sendFile(path.join(publicDir, fileName));
+  };
+}
+
+app.get("/", sendPublicPage("index.html"));
+app.get("/about", sendPublicPage("about.html"));
+app.get("/privacy", sendPublicPage("privacy.html"));
+app.get("/terms", sendPublicPage("terms.html"));
+app.get("/terms-and-conditions", sendPublicPage("terms.html"));
+app.get("/sitemap.xml", sendPublicPage("sitemap.xml"));
+app.get("/robots.txt", sendPublicPage("robots.txt"));
+app.get("/favicon.ico", (_req, res) => {
+  res.sendFile(path.join(publicDir, "favicon.png"));
+});
 
 function requireAdmin(req, _res, next) {
   const apiKey = req.get("x-admin-key");
@@ -108,7 +128,8 @@ app.use((_req, _res, next) => {
   next(new AppError(404, "Route not found."));
 });
 
-app.use((error, _req, res, _next) => {
+app.use((error, _req, res, next) => {
+  void next;
   if (isAppError(error)) {
     res.status(error.statusCode).json({
       error: error.message,
@@ -124,4 +145,3 @@ app.use((error, _req, res, _next) => {
 });
 
 module.exports = app;
-

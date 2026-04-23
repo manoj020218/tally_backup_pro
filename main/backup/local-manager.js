@@ -2,10 +2,17 @@ const fs = require("fs").promises;
 const path = require("path");
 
 function sanitizePathSegment(value) {
-  return String(value || "default")
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
-    .replace(/\s+/g, " ")
-    .trim();
+  const source = String(value || "default");
+  const cleaned = source
+    .split("")
+    .map((char) => {
+      const code = char.charCodeAt(0);
+      const isControl = code >= 0 && code <= 31;
+      const isInvalid = "<>:\"/\\|?*".includes(char);
+      return isControl || isInvalid ? "_" : char;
+    })
+    .join("");
+  return cleaned.replace(/\s+/g, " ").trim();
 }
 
 async function ensureDirectory(dirPath) {
@@ -53,7 +60,7 @@ async function cleanupOldBackups(basePath, retentionDays) {
       : Number.parseInt(retentionDays || "30", 10);
     const cutoffTime = now - Math.max(1, safeRetentionDays) * 24 * 60 * 60 * 1000;
 
-    async function deleteOldFiles(dir) {
+    const deleteOldFiles = async (dir) => {
       const files = await fs.readdir(dir, { withFileTypes: true });
       for (const file of files) {
         const fullPath = path.join(dir, file.name);
@@ -68,7 +75,7 @@ async function cleanupOldBackups(basePath, retentionDays) {
           await fs.unlink(fullPath);
         }
       }
-    }
+    };
 
     await deleteOldFiles(basePath);
     await removeEmptyDirectories(basePath);

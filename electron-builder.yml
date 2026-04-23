@@ -1,14 +1,28 @@
-﻿appId: com.tallybackup.pro
+appId: com.tallybackup.pro
 productName: Tally Backup Pro
 directories:
   buildResources: assets
+  output: dist
 files:
   - main/**/*
   - renderer/dist/**/*
   - package.json
   - node_modules/**/*
+extraResources:
+  - from: assets/
+    to: assets/
 
 win:
   target:
     - nsis
     - portable
+  icon: assets/icon.ico
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  runAfterFinish: true
+  installerIcon: assets/installer-icon.ico
+  uninstallerIcon: assets/installer-icon.ico

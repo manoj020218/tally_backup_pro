@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Menu } = require('electron');
 const path = require('path');
+require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 const { initDatabase } = require('./db');
 const { createTray } = require('./tray');
 const { registerIpcHandlers } = require('./ipc-handlers');

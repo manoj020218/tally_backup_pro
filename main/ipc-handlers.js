@@ -17,6 +17,11 @@ const {
   revalidateLicenseOnServer,
   getLicenseStatus
 } = require("./license");
+const {
+  getGoogleDriveStatus,
+  connectGoogleDrive,
+  disconnectGoogleDrive
+} = require("./sync/service");
 
 let backupEngine = null;
 
@@ -35,11 +40,18 @@ function parseInteger(value, defaultValue) {
   return Number.isFinite(parsed) ? parsed : defaultValue;
 }
 
+const DUMMY_GOOGLE_CLIENT_ID =
+  "000000000000-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com";
+const DUMMY_GOOGLE_CLIENT_SECRET = "dummy-client-secret";
+
 function normalizeSettingsPayload(settings = {}) {
   return {
     tally_port: String(parseInteger(settings.tallyPort, 9000)),
     tally_data_path: String(settings.tallyDataPath || "").trim(),
     gdrive_folder_id: String(settings.gdriveFolderId || "").trim(),
+    gdrive_client_id: String(settings.gdriveClientId || "").trim(),
+    gdrive_client_secret: String(settings.gdriveClientSecret || "").trim(),
+    gdrive_redirect_uri: String(settings.gdriveRedirectUri || "").trim(),
     auto_sync: parseBoolean(settings.autoSync, true) ? "1" : "0",
     notifications: parseBoolean(settings.notifications, true) ? "1" : "0",
     fallback_900_enabled: parseBoolean(settings.fallback900Enabled, true) ? "1" : "0",
@@ -60,6 +72,17 @@ function mapSettingsFromStore() {
     tallyPort: parseInteger(getSetting("tally_port"), 9000),
     tallyDataPath: getSetting("tally_data_path") || "",
     gdriveFolderId: getSetting("gdrive_folder_id") || "",
+    gdriveClientId:
+      getSetting("gdrive_client_id") ||
+      process.env.GOOGLE_CLIENT_ID ||
+      process.env.VITE_GOOGLE_CLIENT_ID ||
+      DUMMY_GOOGLE_CLIENT_ID,
+    gdriveClientSecret:
+      getSetting("gdrive_client_secret") || process.env.GOOGLE_CLIENT_SECRET || DUMMY_GOOGLE_CLIENT_SECRET,
+    gdriveRedirectUri:
+      getSetting("gdrive_redirect_uri") ||
+      process.env.GOOGLE_REDIRECT_URI ||
+      "http://127.0.0.1:3478/oauth2callback",
     autoSync: parseBoolean(getSetting("auto_sync"), true),
     notifications: parseBoolean(getSetting("notifications"), true),
     fallback900Enabled: parseBoolean(getSetting("fallback_900_enabled"), true),
@@ -205,6 +228,19 @@ function registerIpcHandlers(mainWindow) {
 
   ipcMain.handle("runs:getAll", async (_event, limit = 200) => {
     return getBackupRuns(limit);
+  });
+
+  // Google Drive handlers
+  ipcMain.handle("drive:status", async () => {
+    return getGoogleDriveStatus();
+  });
+
+  ipcMain.handle("drive:connect", async () => {
+    return connectGoogleDrive();
+  });
+
+  ipcMain.handle("drive:disconnect", async () => {
+    return disconnectGoogleDrive();
   });
 
   // Profile handlers

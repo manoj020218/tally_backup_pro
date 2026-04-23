@@ -5,7 +5,6 @@ function showNotification(options = {}) {
   const {
     title = 'TallyBackup Pro',
     message = '',
-    type = 'info',
     timeout = 5000
   } = options;
 

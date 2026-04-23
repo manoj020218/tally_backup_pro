@@ -6,6 +6,9 @@ const DEFAULT_FORM = {
   tallyPort: 9000,
   tallyDataPath: "",
   gdriveFolderId: "",
+  gdriveClientId: "000000000000-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com",
+  gdriveClientSecret: "dummy-client-secret",
+  gdriveRedirectUri: "http://127.0.0.1:3478/oauth2callback",
   autoSync: true,
   notifications: true,
   fallback900Enabled: true,
@@ -51,7 +54,6 @@ export default function Settings() {
 
   useEffect(() => {
     refreshSettingsAndLicense();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleChange = (field, value) => {
@@ -216,6 +218,43 @@ export default function Settings() {
                 className="input"
                 placeholder="Enter Google Drive folder ID"
               />
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-2">OAuth Client ID</label>
+              <input
+                type="text"
+                value={formData.gdriveClientId || ""}
+                onChange={(event) => handleChange("gdriveClientId", event.target.value)}
+                className="input"
+                placeholder="your-client-id.apps.googleusercontent.com"
+              />
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-2">OAuth Client Secret</label>
+              <input
+                type="password"
+                value={formData.gdriveClientSecret || ""}
+                onChange={(event) => handleChange("gdriveClientSecret", event.target.value)}
+                className="input"
+                placeholder="Enter client secret"
+              />
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-2">OAuth Redirect URI</label>
+              <input
+                type="text"
+                value={formData.gdriveRedirectUri || ""}
+                onChange={(event) => handleChange("gdriveRedirectUri", event.target.value)}
+                className="input"
+                placeholder="http://127.0.0.1:3478/oauth2callback"
+              />
+              <p className="text-sm text-gray-600 mt-2">
+                You can keep dummy OAuth values during setup. Replace with real Google Web Client credentials before
+                production cloud sync.
+              </p>
             </div>
 
             <div className="mb-4">

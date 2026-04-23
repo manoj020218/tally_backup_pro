@@ -4,6 +4,9 @@ const defaultSettings = {
   companyName: "",
   backupInterval: 60,
   gdriveFolderId: "",
+  gdriveClientId: "000000000000-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com",
+  gdriveClientSecret: "dummy-client-secret",
+  gdriveRedirectUri: "http://127.0.0.1:3478/oauth2callback",
   autoSync: true,
   notifications: true,
   fallback900Enabled: true,
@@ -15,6 +18,16 @@ const defaultSettings = {
 
 function createProfileId() {
   return `profile_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+}
+
+function parseBoolean(value, defaultValue = false) {
+  if (value === undefined || value === null) return defaultValue;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const normalized = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off", ""].includes(normalized)) return false;
+  return defaultValue;
 }
 
 const SCHEDULE_TO_CRON = {
@@ -94,9 +107,9 @@ function normalizeProfile(profile = {}) {
     retentionDays: Number.isFinite(retentionDaysParsed) ? Math.max(1, retentionDaysParsed) : 30,
     gdriveEnabled:
       profile.gdriveEnabled !== undefined
-        ? Boolean(profile.gdriveEnabled)
-        : Boolean(profile.gdrive_enabled),
-    compression: profile.compression !== undefined ? Boolean(profile.compression) : true
+        ? parseBoolean(profile.gdriveEnabled, false)
+        : parseBoolean(profile.gdrive_enabled, false),
+    compression: profile.compression !== undefined ? parseBoolean(profile.compression, true) : true
   };
 }
 

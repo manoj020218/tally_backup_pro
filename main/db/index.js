@@ -5,6 +5,39 @@ const { app } = require('electron');
 
 let db = null;
 
+function ensureColumns(database, tableName, columns = {}) {
+  const tableInfo = database.prepare(`PRAGMA table_info(${tableName})`).all();
+  const existing = new Set(tableInfo.map((row) => row.name));
+
+  Object.entries(columns).forEach(([column, definition]) => {
+    if (existing.has(column)) return;
+    database.exec(`ALTER TABLE ${tableName} ADD COLUMN ${column} ${definition}`);
+  });
+}
+
+function ensureSchemaCompatibility(database) {
+  ensureColumns(database, "backup_profiles", {
+    company_id: "TEXT NOT NULL DEFAULT ''",
+    date_range_mode: "TEXT NOT NULL DEFAULT 'incremental'",
+    custom_from: "TEXT",
+    custom_to: "TEXT",
+    retention_days: "INTEGER NOT NULL DEFAULT 30",
+    gdrive_enabled: "INTEGER NOT NULL DEFAULT 0"
+  });
+
+  ensureColumns(database, "backup_runs", {
+    file_size: "INTEGER NOT NULL DEFAULT 0",
+    error_log: "TEXT",
+    drive_status: "TEXT"
+  });
+
+  ensureColumns(database, "backup_state", {
+    profile_id: "TEXT NOT NULL DEFAULT ''",
+    record_count: "INTEGER NOT NULL DEFAULT 0",
+    last_size_kb: "INTEGER NOT NULL DEFAULT 0"
+  });
+}
+
 async function initDatabase() {
   try {
     const userDataPath = app.getPath('userData');
@@ -20,6 +53,7 @@ async function initDatabase() {
     const schemaPath = path.join(__dirname, 'schema.sql');
     const schema = fs.readFileSync(schemaPath, 'utf-8');
     db.exec(schema);
+    ensureSchemaCompatibility(db);
 
     console.log('Database initialized successfully at:', dbPath);
     return db;

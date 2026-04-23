@@ -23,6 +23,11 @@ const invokeChannelMap = {
   getSettings: 'settings:get',
   updateSettings: 'settings:update',
 
+  // Google Drive
+  getDriveStatus: 'drive:status',
+  connectDrive: 'drive:connect',
+  disconnectDrive: 'drive:disconnect',
+
   // License
   validateLicense: 'license:validate',
   revalidateLicense: 'license:revalidate',
@@ -45,6 +50,9 @@ const directAllowedInvokeChannels = new Set([
   'restore:exportCsv',
   'settings:get',
   'settings:update',
+  'drive:status',
+  'drive:connect',
+  'drive:disconnect',
   'license:validate',
   'license:revalidate',
   'license:validateOnStartup',
@@ -131,6 +139,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   exportRestoreCsv: (rows, options) => invoke('exportRestoreCsv', rows, options),
   getSettings: () => invoke('getSettings'),
   updateSettings: (settings) => invoke('updateSettings', settings),
+  getDriveStatus: () => invoke('getDriveStatus'),
+  connectDrive: () => invoke('connectDrive'),
+  disconnectDrive: () => invoke('disconnectDrive'),
   validateLicense: (licenseKey) => invoke('validateLicense', licenseKey),
   revalidateLicense: () => invoke('revalidateLicense'),
   validateLicenseOnStartup: () => invoke('validateLicenseOnStartup'),

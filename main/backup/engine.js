@@ -18,6 +18,7 @@ const { getLastBackupDate, updateBackupState } = require("./incremental");
 const { runFull900Backup } = require("./full-900");
 const { enqueueBackupJob } = require("./xml-queue");
 const { getSetting } = require("../db/queries");
+const { syncBackupRunArtifacts } = require("../sync/service");
 
 const FULL_BACKUP_START_DATE = "19000101";
 const DEFAULT_REQUIRED_FREE_BYTES = 50 * 1024 * 1024; // 50 MB
@@ -99,6 +100,7 @@ function normalizeProfile(profile) {
     customTo: profile.custom_to || profile.customTo || "",
     localPath: profile.local_path || profile.localPath || path.resolve(process.cwd(), "backups"),
     retentionDays: Number.parseInt(profile.retention_days || profile.retentionDays || "30", 10),
+    gdriveEnabled: parseBoolean(profile.gdrive_enabled ?? profile.gdriveEnabled, false),
     tallyPort: Number.parseInt(profile.tally_port || profile.tallyPort || "9000", 10),
     tallyHost: profile.tally_host || profile.tallyHost || "127.0.0.1"
   };
@@ -514,14 +516,43 @@ async function runBackup(profile, context = {}) {
     results
   };
 
+  let driveSyncErrors = [];
+  try {
+    const driveSync = await syncBackupRunArtifacts(normalized, summary);
+    summary.driveSync = driveSync;
+    driveSyncErrors = Array.isArray(driveSync?.errors)
+      ? driveSync.errors.map((item) => item.error).filter(Boolean)
+      : [];
+
+    if (driveSync.enabled && driveSyncErrors.length > 0 && summary.status === "success") {
+      summary.status = "partial";
+      summary.success = false;
+    }
+  } catch (driveError) {
+    summary.driveSync = {
+      enabled: true,
+      syncedCount: 0,
+      skippedCount: 0,
+      errors: [{ error: driveError.message }],
+      files: []
+    };
+    driveSyncErrors = [driveError.message];
+    if (summary.status === "success") {
+      summary.status = "partial";
+      summary.success = false;
+    }
+  }
+
   const firstFile = results.find((item) => item.filePath);
+  const typeErrors = failedCount > 0 ? results.filter((r) => !r.success).map((r) => r.error).filter(Boolean) : [];
+  const allErrors = [...typeErrors, ...driveSyncErrors].filter(Boolean);
   maybeLogBackupRun(
     context.db,
     normalized,
     summary.status,
     firstFile ? firstFile.filePath : "",
     totalSizeBytes,
-    failedCount > 0 ? results.filter((r) => !r.success).map((r) => r.error).join(" | ") : ""
+    allErrors.join(" | ")
   );
 
   return summary;

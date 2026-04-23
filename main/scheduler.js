@@ -6,6 +6,7 @@ const {
   getSetting
 } = require("./db/queries");
 const { BackupEngine } = require("./backup/engine");
+const { notifyBackupComplete, notifyBackupError } = require("./notification");
 const {
   listQueuedBackups,
   removeQueuedBackupJob
@@ -15,6 +16,21 @@ let scheduledJobs = [];
 let reconnectInterval = null;
 let wasDisconnected = false;
 let isProcessingQueue = false;
+let backupExecutionChain = Promise.resolve();
+
+function parseBoolean(value, defaultValue = false) {
+  if (value === undefined || value === null) return defaultValue;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const normalized = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return defaultValue;
+}
+
+function areNotificationsEnabled() {
+  return parseBoolean(getSetting("notifications"), true);
+}
 
 async function runProfileBackup(profile, mainWindow, trigger = "scheduled") {
   const { getDatabase } = require("./db");
@@ -35,7 +51,21 @@ async function runProfileBackup(profile, mainWindow, trigger = "scheduled") {
     });
   }
 
+  if (areNotificationsEnabled()) {
+    if (result && result.status !== "failed") {
+      notifyBackupComplete(profile, result);
+    } else {
+      notifyBackupError(profile, result?.error || "Scheduled backup failed.");
+    }
+  }
+
   return result;
+}
+
+function enqueueProfileBackup(profile, mainWindow, trigger = "scheduled") {
+  const task = backupExecutionChain.then(() => runProfileBackup(profile, mainWindow, trigger));
+  backupExecutionChain = task.catch(() => null);
+  return task;
 }
 
 async function processQueuedBackups(mainWindow) {
@@ -59,7 +89,7 @@ async function processQueuedBackups(mainWindow) {
       }
 
       try {
-        await runProfileBackup(profile, mainWindow, "queued");
+        await enqueueProfileBackup(profile, mainWindow, "queued");
         removeQueuedBackupJob(profileId);
       } catch (error) {
         console.error(`Queued backup failed for profile ${profileId}:`, error.message);
@@ -123,7 +153,7 @@ function scheduleBackup(profile, mainWindow) {
       console.log(`Running scheduled backup for: ${profile.name}`);
 
       try {
-        await runProfileBackup(profile, mainWindow, "scheduled");
+        await enqueueProfileBackup(profile, mainWindow, "scheduled");
       } catch (error) {
         console.error("Scheduled backup failed:", error);
         mainWindow.webContents.send("backup:scheduled-error", {

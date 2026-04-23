@@ -33,26 +33,41 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const { invoke } = useIPC();
   const setBackupProfiles = useAppStore((state) => state.setBackupProfiles);
+  const updateSettings = useAppStore((state) => state.updateSettings);
+  const setGdriveStatus = useAppStore((state) => state.setGdriveStatus);
 
   useEffect(() => {
     let cancelled = false;
 
-    async function loadProfiles() {
+    async function loadInitialState() {
       try {
-        const profiles = await invoke("getProfiles");
-        if (!cancelled && Array.isArray(profiles)) {
+        const [profiles, settings, driveStatus] = await Promise.all([
+          invoke("getProfiles"),
+          invoke("getSettings"),
+          invoke("getDriveStatus")
+        ]);
+
+        if (cancelled) return;
+
+        if (Array.isArray(profiles)) {
           setBackupProfiles(profiles);
         }
+        if (settings && typeof settings === "object") {
+          updateSettings(settings);
+        }
+        if (driveStatus && typeof driveStatus === "object") {
+          setGdriveStatus(driveStatus);
+        }
       } catch (error) {
-        console.error("Failed to load profiles:", error.message);
+        console.error("Failed to load app state:", error.message);
       }
     }
 
-    loadProfiles();
+    loadInitialState();
     return () => {
       cancelled = true;
     };
-  }, [invoke, setBackupProfiles]);
+  }, [invoke, setBackupProfiles, setGdriveStatus, updateSettings]);
 
   return (
     <div className="app-shell">
