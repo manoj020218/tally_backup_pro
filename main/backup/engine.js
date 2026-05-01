@@ -453,6 +453,7 @@ async function runBackup(profile, context = {}) {
           profileId: normalized.id,
           lastFromDate: fromDate,
           lastToDate: effectiveToDate,
+          lastFilePath: outputFile,
           recordCount,
           sizeKb: size.kb
         });
@@ -474,6 +475,7 @@ async function runBackup(profile, context = {}) {
           profileId: normalized.id,
           lastFromDate: fromDate,
           lastToDate: effectiveToDate,
+          lastFilePath: null,
           recordCount: 0,
           sizeKb: 0
         });
@@ -544,13 +546,21 @@ async function runBackup(profile, context = {}) {
   }
 
   const firstFile = results.find((item) => item.filePath);
+  const totalRecordCount = results.reduce(
+    (sum, item) => sum + (Number.isFinite(Number(item.recordCount)) ? Number(item.recordCount) : 0),
+    0
+  );
+  summary.totalRecordCount = totalRecordCount;
+  summary.noData = totalRecordCount === 0;
+  summary.filePath = firstFile ? firstFile.filePath : backupDir;
+
   const typeErrors = failedCount > 0 ? results.filter((r) => !r.success).map((r) => r.error).filter(Boolean) : [];
   const allErrors = [...typeErrors, ...driveSyncErrors].filter(Boolean);
   maybeLogBackupRun(
     context.db,
     normalized,
     summary.status,
-    firstFile ? firstFile.filePath : "",
+    summary.filePath || "",
     totalSizeBytes,
     allErrors.join(" | ")
   );

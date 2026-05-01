@@ -20,6 +20,7 @@ async function updateBackupState(db, backupData) {
         last_from_date: backupData.lastFromDate,
         last_to_date: backupData.lastToDate,
         last_run_at: new Date().toISOString(),
+        last_file_path: backupData.lastFilePath || null,
         record_count: backupData.recordCount,
         last_size_kb: backupData.sizeKb
       }

@@ -50,15 +50,16 @@ export default function Restore() {
   );
 
   async function handleOpenFolder() {
-    if (!selectedBackup?.file_path) {
-      setError("Selected backup has no file path.");
+    const targetPath = String(selectedBackup?.file_path || "").trim();
+    if (!targetPath) {
+      setError("Selected backup has no generated file path yet. Run a backup with records to create files.");
       return;
     }
 
     setMessage("");
     setError("");
     try {
-      await invoke("openRestoreFolder", selectedBackup.file_path);
+      await invoke("openRestoreFolder", targetPath);
       setMessage("Opened backup location in File Explorer.");
     } catch (openError) {
       setError(`Unable to open folder: ${openError.message}`);

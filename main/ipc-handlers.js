@@ -1,4 +1,5 @@
-const fs = require("fs").promises;
+const fsNative = require("fs");
+const fs = fsNative.promises;
 const path = require("path");
 const { app, ipcMain, shell } = require("electron");
 const { pingTally, getCompanyList } = require("./tally/connector");
@@ -22,6 +23,7 @@ const {
   connectGoogleDrive,
   disconnectGoogleDrive
 } = require("./sync/service");
+const { sanitizePathSegment } = require("./backup/local-manager");
 
 let backupEngine = null;
 
@@ -165,6 +167,40 @@ function toCsv(rows = []) {
   return `${lines.join("\n")}\n`;
 }
 
+function resolveRunFilePath(run = {}) {
+  const directPath = String(run.file_path || "").trim();
+  if (directPath) return directPath;
+
+  const profileId = String(run.profile_id || "").trim();
+  if (!profileId) return "";
+
+  const profile = getBackupProfileById(profileId);
+  if (!profile) return "";
+
+  const basePath = String(profile.local_path || "").trim();
+  if (!basePath) return "";
+
+  const safeCompanyName = sanitizePathSegment(profile.company_name || run.profile_name || "Company");
+  const startedAt = String(run.started_at || "").trim();
+  const dateFolder = /^\d{4}-\d{2}-\d{2}/.test(startedAt) ? startedAt.slice(0, 10) : "";
+
+  const datedPath = dateFolder ? path.join(basePath, safeCompanyName, dateFolder) : "";
+  if (datedPath && fsNative.existsSync(datedPath)) {
+    return datedPath;
+  }
+
+  const companyPath = path.join(basePath, safeCompanyName);
+  if (fsNative.existsSync(companyPath)) {
+    return companyPath;
+  }
+
+  if (fsNative.existsSync(basePath)) {
+    return basePath;
+  }
+
+  return "";
+}
+
 async function runBackupWithProfileId(profileId, options = {}) {
   const profile = getBackupProfileById(profileId);
   if (!profile) throw new Error("Profile not found");
@@ -235,7 +271,14 @@ function registerIpcHandlers(mainWindow) {
   });
 
   registerHandler("runs:getAll", async (_event, limit = 200) => {
-    return getBackupRuns(limit);
+    const runs = getBackupRuns(limit);
+    return runs.map((row) => {
+      const fallbackPath = resolveRunFilePath(row);
+      return {
+        ...row,
+        file_path: String(row.file_path || "").trim() || fallbackPath
+      };
+    });
   });
 
   // Google Drive handlers

@@ -114,10 +114,17 @@ function parseVouchers(dataNode) {
     .map((voucher) => {
       const amountRaw = readObjectValue(voucher, ["AMOUNT"]);
       const amountValue = Number.parseFloat(String(amountRaw || ""));
+      const voucherType = readObjectValue(voucher, [
+        "VOUCHERTYPENAME",
+        "VOUCHERTYPE",
+        "VCHTYPE",
+        "PARENT"
+      ]);
       return {
         voucherNumber: readObjectValue(voucher, ["VOUCHERNUMBER", "VOUCHERNUMBER", "REFERENCE"]),
         date: readObjectValue(voucher, ["DATE"]),
-        type: readObjectValue(voucher, ["VOUCHERTYPE", "VOUCHERTYPENAME"]),
+        type: voucherType,
+        voucherType,
         amount: Number.isFinite(amountValue) ? amountValue : 0,
         narration: readObjectValue(voucher, ["NARRATION"]),
         raw: voucher

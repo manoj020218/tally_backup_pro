@@ -2,6 +2,7 @@
 const {
   buildCompanyListRequest,
   buildVoucherRequest,
+  buildDayBookRequest,
   buildMasterRequest
 } = require("./xml-builder");
 const { parseXMLResponse } = require("./xml-parser");
@@ -14,6 +15,96 @@ const {
 const DEFAULT_TALLY_HOST = "127.0.0.1";
 const DEFAULT_TALLY_PORT = 9000;
 const DEFAULT_TIMEOUT_MS = 30000;
+const DAY_BOOK_CACHE_TTL_MS = 60 * 1000;
+
+const TRANSACTION_TYPE_MATCHERS = {
+  sales: [/\bsales?\b/i],
+  purchase: [/\bpurchase\b/i],
+  receipt: [/\breceipt\b/i],
+  payment: [/\bpayment\b/i],
+  journal: [/\bjournal\b/i],
+  "credit note": [/\bcredit\s*note\b/i, /\bcredit\b.*\bnote\b/i],
+  "debit note": [/\bdebit\s*note\b/i, /\bdebit\b.*\bnote\b/i],
+  "stock journal": [/\bstock\s*journal\b/i, /\bstock\b.*\bjournal\b/i, /\bjournal\b.*\bstock\b/i],
+  "delivery note": [/\bdelivery\s*note\b/i, /\bdelivery\b.*\bnote\b/i]
+};
+
+const dayBookCache = new Map();
+
+function normalizeForMatching(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getVoucherTypeText(voucher = {}) {
+  const raw = voucher.raw && typeof voucher.raw === "object" ? voucher.raw : {};
+  const candidates = [
+    voucher.voucherType,
+    voucher.type,
+    raw.VOUCHERTYPENAME,
+    raw.VOUCHERTYPE,
+    raw.VCHTYPE,
+    raw.PARENT
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate !== undefined && candidate !== null && String(candidate).trim()) {
+      return String(candidate).trim();
+    }
+  }
+
+  return "";
+}
+
+function shouldIncludeVoucherForDataType(voucher = {}, dataTypeId = "") {
+  const normalizedType = normalizeForMatching(dataTypeId);
+  const patterns = TRANSACTION_TYPE_MATCHERS[normalizedType];
+  if (!patterns || patterns.length === 0) {
+    return true;
+  }
+
+  const voucherTypeText = getVoucherTypeText(voucher);
+  if (!voucherTypeText) {
+    // If type is missing, keep the row instead of silently dropping data.
+    return true;
+  }
+
+  return patterns.some((pattern) => pattern.test(voucherTypeText));
+}
+
+function makeDayBookCacheKey({ host, port, companyName, fromDate, toDate }) {
+  return [host, port, companyName, fromDate, toDate].map((item) => String(item || "")).join("|");
+}
+
+function readDayBookCache(cacheKey) {
+  const cached = dayBookCache.get(cacheKey);
+  if (!cached) return null;
+
+  if (Date.now() - cached.createdAt > DAY_BOOK_CACHE_TTL_MS) {
+    dayBookCache.delete(cacheKey);
+    return null;
+  }
+
+  return cached;
+}
+
+async function fetchDayBookData({ client, host, port, companyName, fromDate, toDate }) {
+  const cacheKey = makeDayBookCacheKey({ host, port, companyName, fromDate, toDate });
+  const cached = readDayBookCache(cacheKey);
+  if (cached) return cached;
+
+  const xmlRequest = buildDayBookRequest(fromDate, toDate, companyName);
+  const xmlResponse = await postXml(client, xmlRequest);
+  const parsed = parseXMLResponse(xmlResponse);
+  const payload = {
+    xmlRequest,
+    xmlResponse,
+    parsed,
+    createdAt: Date.now()
+  };
+
+  dayBookCache.set(cacheKey, payload);
+  return payload;
+}
 
 function buildTallyBaseUrl(host = DEFAULT_TALLY_HOST, port = DEFAULT_TALLY_PORT) {
   return `http://${host}:${port}`;
@@ -115,6 +206,7 @@ async function fetchTallyData({
   timeoutMs = DEFAULT_TIMEOUT_MS,
   xml
 }) {
+  const typeDefinition = resolveDataType(dataType);
   const client = createHttpClient(host, port, timeoutMs);
   const requestXml =
     typeof xml === "string" && xml.trim()
@@ -126,13 +218,52 @@ async function fetchTallyData({
           toDate
         });
 
-  const responseXml = await postXml(client, requestXml);
-  const parsed = parseXMLResponse(responseXml);
+  let effectiveRequestXml = requestXml;
+  let responseXml = await postXml(client, requestXml);
+  let parsed = parseXMLResponse(responseXml);
+  let usedDayBookFallback = false;
+
+  if (typeDefinition && isTransactionType(typeDefinition)) {
+    const vouchers = Array.isArray(parsed.vouchers) ? parsed.vouchers : [];
+
+    // Voucher Register can return no rows when user voucher type names differ
+    // from predefined names (e.g. "Sale 2026-27"). Fall back to Day Book.
+    if (vouchers.length === 0 && !(typeof xml === "string" && xml.trim())) {
+      try {
+        const dayBookData = await fetchDayBookData({
+          client,
+          host,
+          port,
+          companyName,
+          fromDate,
+          toDate
+        });
+        effectiveRequestXml = dayBookData.xmlRequest;
+        responseXml = dayBookData.xmlResponse;
+        parsed = dayBookData.parsed;
+        usedDayBookFallback = true;
+      } catch (_error) {
+        // Keep original parsed result if Day Book fallback also fails.
+      }
+    }
+
+    const filteredVouchers = (Array.isArray(parsed.vouchers) ? parsed.vouchers : []).filter((voucher) =>
+      shouldIncludeVoucherForDataType(voucher, typeDefinition.id)
+    );
+
+    parsed = {
+      ...parsed,
+      vouchers: filteredVouchers
+    };
+  }
 
   return {
     ...parsed,
-    xmlRequest: requestXml,
-    xmlResponse: responseXml
+    xmlRequest: effectiveRequestXml,
+    xmlResponse: responseXml,
+    meta: {
+      usedDayBookFallback
+    }
   };
 }
 

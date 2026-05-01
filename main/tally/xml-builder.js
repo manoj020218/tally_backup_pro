@@ -70,6 +70,33 @@ function buildVoucherRequest(voucherType, fromDate, toDate, companyName) {
 </ENVELOPE>`.trim();
 }
 
+function buildDayBookRequest(fromDate, toDate, companyName) {
+  if (!companyName) throw new Error("companyName is required.");
+
+  const from = formatTallyDate(fromDate);
+  const to = formatTallyDate(toDate);
+
+  return `
+<ENVELOPE>
+  <HEADER>
+    <VERSION>1</VERSION>
+    <TALLYREQUEST>Export</TALLYREQUEST>
+    <TYPE>Data</TYPE>
+    <ID>Day Book</ID>
+  </HEADER>
+  <BODY>
+    <DESC>
+      <STATICVARIABLES>
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+        <SVCURRENTCOMPANY>${escapeXml(companyName)}</SVCURRENTCOMPANY>
+        <SVFROMDATE>${from}</SVFROMDATE>
+        <SVTODATE>${to}</SVTODATE>
+      </STATICVARIABLES>
+    </DESC>
+  </BODY>
+</ENVELOPE>`.trim();
+}
+
 function buildMasterRequest(masterType, companyName) {
   if (!masterType) throw new Error("masterType is required.");
   if (!companyName) throw new Error("companyName is required.");
@@ -102,7 +129,7 @@ module.exports = {
   formatTallyDate,
   buildCompanyListRequest,
   buildVoucherRequest,
+  buildDayBookRequest,
   buildMasterRequest,
   buildVoucherCountRequest
 };
-
