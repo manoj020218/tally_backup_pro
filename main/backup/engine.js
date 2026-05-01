@@ -555,6 +555,28 @@ async function runBackup(profile, context = {}) {
     allErrors.join(" | ")
   );
 
+  // Send email notifications
+  try {
+    const emailService = require("../services/email-service");
+    if (emailService.isReady) {
+      if (summary.success) {
+        await emailService.sendBackupSuccess(normalized, {
+          size: totalSizeBytes,
+          duration: `${Math.round((new Date() - startTime) / 1000)}s`,
+          completedAt: summary.completedAt,
+          successCount,
+          failedCount
+        });
+      } else {
+        const errorMessage = allErrors.join("; ") || "Backup failed with unknown error";
+        await emailService.sendBackupFailure(normalized, new Error(errorMessage));
+      }
+    }
+  } catch (error) {
+    // Don't let email errors interrupt the backup process
+    // Just log them silently
+  }
+
   return summary;
 }
 

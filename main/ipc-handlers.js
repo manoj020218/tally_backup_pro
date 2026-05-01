@@ -303,6 +303,105 @@ function registerIpcHandlers(mainWindow) {
     return mapSettingsFromStore();
   });
 
+  // Email handlers
+  ipcMain.handle("email:saveSettings", async (_event, emailSettings) => {
+    try {
+      const emailService = require("./services/email-service");
+      
+      // Validate configuration
+      const validation = emailService.validateConfig(emailSettings);
+      if (!validation.valid) {
+        return {
+          success: false,
+          error: validation.errors.join("; ")
+        };
+      }
+
+      // Encrypt sensitive data before storing
+      const { encrypt } = require("../../shared/utils/cryptoUtils");
+      const encryptedSettings = { ...emailSettings };
+      
+      if (emailSettings.provider === "smtp" && emailSettings.smtpPassword) {
+        encryptedSettings.smtpPassword = encrypt(emailSettings.smtpPassword);
+      } else if (emailSettings.provider === "sendgrid" && emailSettings.sendgridApiKey) {
+        encryptedSettings.sendgridApiKey = encrypt(emailSettings.sendgridApiKey);
+      }
+
+      // Save to settings
+      await setSetting("emailSettings", JSON.stringify(encryptedSettings));
+
+      // Initialize email service with new config
+      await emailService.initialize(encryptedSettings);
+
+      return { success: true };
+    } catch (error) {
+      console.error("Failed to save email settings:", error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  });
+
+  ipcMain.handle("email:testSend", async (_event, toEmail) => {
+    try {
+      const emailService = require("./services/email-service");
+      
+      if (!emailService.isReady) {
+        return {
+          success: false,
+          message: "Email service not configured"
+        };
+      }
+
+      return await emailService.sendTestEmail(toEmail);
+    } catch (error) {
+      console.error("Failed to send test email:", error);
+      return {
+        success: false,
+        message: error.message
+      };
+    }
+  });
+
+  ipcMain.handle("email:getSettings", async () => {
+    try {
+      const storedSettings = await getSetting("emailSettings");
+      if (!storedSettings) {
+        return {
+          enabled: false,
+          provider: "smtp",
+          recipientEmails: [],
+          notifyOnSuccess: true,
+          notifyOnFailure: true
+        };
+      }
+
+      const settings = JSON.parse(storedSettings);
+      // Don't return encrypted passwords/keys
+      return {
+        enabled: settings.enabled,
+        provider: settings.provider,
+        recipientEmails: settings.recipientEmails || [],
+        notifyOnSuccess: settings.notifyOnSuccess,
+        notifyOnFailure: settings.notifyOnFailure,
+        fromEmail: settings.fromEmail,
+        smtpHost: settings.smtpHost,
+        smtpPort: settings.smtpPort,
+        smtpUser: settings.smtpUser
+      };
+    } catch (error) {
+      console.error("Failed to get email settings:", error);
+      return {
+        enabled: false,
+        provider: "smtp",
+        recipientEmails: [],
+        notifyOnSuccess: true,
+        notifyOnFailure: true
+      };
+    }
+  });
+
   // License handlers
   ipcMain.handle("license:validate", async (_event, licenseKey) => {
     return validateLicense(licenseKey);

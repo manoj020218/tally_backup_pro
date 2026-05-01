@@ -74,12 +74,48 @@ function safeCompare(a, b) {
   return crypto.timingSafeEqual(left, right);
 }
 
+// Simple encrypt/decrypt wrapper with hardcoded key for credential encryption
+// In production, consider storing key securely or using OS keychain
+const ENCRYPTION_KEY_SEED = "tallybackup-pro-credentials-2024";
+
+function getEncryptionKey() {
+  // Derive a consistent 32-byte key from the seed
+  return deriveKeyPBKDF2(ENCRYPTION_KEY_SEED, "tally-backup-salt", 100000, 32);
+}
+
+function encrypt(plainText) {
+  if (!plainText) return "";
+  try {
+    const key = getEncryptionKey();
+    const result = encryptTextAESGCM(plainText, key);
+    // Return a compact JSON representation
+    return JSON.stringify(result);
+  } catch (error) {
+    console.error("Encryption failed:", error);
+    return "";
+  }
+}
+
+function decrypt(encryptedData) {
+  if (!encryptedData) return "";
+  try {
+    const key = getEncryptionKey();
+    const payload = JSON.parse(encryptedData);
+    return decryptTextAESGCM(payload, key);
+  } catch (error) {
+    console.error("Decryption failed:", error);
+    return "";
+  }
+}
+
 module.exports = {
   randomToken,
   sha256Hex,
   deriveKeyPBKDF2,
   encryptTextAESGCM,
   decryptTextAESGCM,
-  safeCompare
+  safeCompare,
+  encrypt,
+  decrypt
 };
 

@@ -79,6 +79,27 @@ app.whenReady().then(async () => {
   // Initialize database
   await initDatabase();
   
+  // Initialize email service
+  try {
+    const emailService = require('./services/email-service');
+    const storedSettings = await getSetting('emailSettings');
+    if (storedSettings) {
+      const { decrypt } = require('../shared/utils/cryptoUtils');
+      const settings = JSON.parse(storedSettings);
+      
+      // Decrypt sensitive data for initialization
+      if (settings.provider === 'smtp' && settings.smtpPassword) {
+        settings.smtpPassword = decrypt(settings.smtpPassword);
+      } else if (settings.provider === 'sendgrid' && settings.sendgridApiKey) {
+        settings.sendgridApiKey = decrypt(settings.sendgridApiKey);
+      }
+      
+      await emailService.initialize(settings);
+    }
+  } catch (error) {
+    console.warn('Failed to initialize email service:', error);
+  }
+  
   // Validate license
   const licenseResult = await validateLicenseOnStartup();
   if (!licenseResult || licenseResult.valid === false) {

@@ -130,6 +130,17 @@ export function createAppSlices(set) {
         total: 0
       }
     },
+    emailSettings: {
+      enabled: false,
+      provider: "smtp",
+      recipientEmails: [],
+      notifyOnSuccess: true,
+      notifyOnFailure: true,
+      fromEmail: "",
+      smtpHost: "",
+      smtpPort: 587,
+      smtpUser: ""
+    },
     settings: { ...defaultSettings },
 
     addBackupProfile: (profileData) =>
@@ -202,6 +213,14 @@ export function createAppSlices(set) {
         settings: {
           ...state.settings,
           ...settingsPatch
+        }
+      })),
+
+    updateEmailSettings: (emailSettingsPatch = {}) =>
+      set((state) => ({
+        emailSettings: {
+          ...state.emailSettings,
+          ...emailSettingsPatch
         }
       })),
 

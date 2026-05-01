@@ -1,32 +1,23 @@
 import React, { useEffect, useState } from 'react';
-import Dashboard from './screens/Dashboard';
-import BackupProfiles from './screens/BackupProfiles';
-import BackupHistory from './screens/BackupHistory';
-import ManualBackup from './screens/ManualBackup';
-import GoogleDrive from './screens/GoogleDrive';
-import Restore from './screens/Restore';
-import Settings from './screens/Settings';
+import ModernDashboard from './screens/ModernDashboard';
+import ModernBackupProfiles from './screens/ModernBackupProfiles';
+import ModernBackupHistory from './screens/ModernBackupHistory';
+import ModernManualBackup from './screens/ModernManualBackup';
+import ModernGoogleDrive from './screens/ModernGoogleDrive';
+import ModernRestore from './screens/ModernRestore';
+import ModernSettings from './screens/ModernSettings';
 import { useIPC } from './hooks/useElectron';
 import { useAppStore } from './store';
-
-const tabs = [
-  { id: 'dashboard', label: 'Dashboard' },
-  { id: 'profiles', label: 'Backup Profiles' },
-  { id: 'manual', label: 'Manual Backup' },
-  { id: 'history', label: 'Backup History' },
-  { id: 'restore', label: 'Restore / Export' },
-  { id: 'drive', label: 'Google Drive Sync' },
-  { id: 'settings', label: 'Settings' }
-];
+import ModernLayout from './components/ModernLayout';
 
 function renderScreen(activeTab) {
-  if (activeTab === 'profiles') return <BackupProfiles />;
-  if (activeTab === 'manual') return <ManualBackup />;
-  if (activeTab === 'history') return <BackupHistory />;
-  if (activeTab === 'restore') return <Restore />;
-  if (activeTab === 'drive') return <GoogleDrive />;
-  if (activeTab === 'settings') return <Settings />;
-  return <Dashboard />;
+  if (activeTab === 'profiles') return <ModernBackupProfiles />;
+  if (activeTab === 'manual') return <ModernManualBackup />;
+  if (activeTab === 'history') return <ModernBackupHistory />;
+  if (activeTab === 'restore') return <ModernRestore />;
+  if (activeTab === 'drive') return <ModernGoogleDrive />;
+  if (activeTab === 'settings') return <ModernSettings />;
+  return <ModernDashboard />;
 }
 
 export default function App() {
@@ -70,25 +61,8 @@ export default function App() {
   }, [invoke, setBackupProfiles, setGdriveStatus, updateSettings]);
 
   return (
-    <div className="app-shell">
-      <div className="app-nav-wrap">
-        <div className="container">
-          <div className="app-nav">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                className={`nav-tab ${activeTab === tab.id ? 'active' : ''}`}
-                onClick={() => setActiveTab(tab.id)}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
+    <ModernLayout activeTab={activeTab} onTabChange={setActiveTab}>
       {renderScreen(activeTab)}
-    </div>
+    </ModernLayout>
   );
 }
