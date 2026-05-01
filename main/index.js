@@ -76,57 +76,78 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  // Initialize database
-  await initDatabase();
-  
-  // Initialize email service
   try {
-    const emailService = require('./services/email-service');
-    const storedSettings = await getSetting('emailSettings');
-    if (storedSettings) {
-      const { decrypt } = require('../shared/utils/cryptoUtils');
-      const settings = JSON.parse(storedSettings);
-      
-      // Decrypt sensitive data for initialization
-      if (settings.provider === 'smtp' && settings.smtpPassword) {
-        settings.smtpPassword = decrypt(settings.smtpPassword);
-      } else if (settings.provider === 'sendgrid' && settings.sendgridApiKey) {
-        settings.sendgridApiKey = decrypt(settings.sendgridApiKey);
+    // Initialize database
+    await initDatabase();
+    
+    // Initialize email service
+    try {
+      const emailService = require('./services/email-service');
+      const storedSettings = await getSetting('emailSettings');
+      if (storedSettings) {
+        const { decrypt } = require('../shared/utils/cryptoUtils');
+        const settings = JSON.parse(storedSettings);
+        
+        // Decrypt sensitive data for initialization
+        if (settings.provider === 'smtp' && settings.smtpPassword) {
+          settings.smtpPassword = decrypt(settings.smtpPassword);
+        } else if (settings.provider === 'sendgrid' && settings.sendgridApiKey) {
+          settings.sendgridApiKey = decrypt(settings.sendgridApiKey);
+        }
+        
+        await emailService.initialize(settings);
       }
-      
-      await emailService.initialize(settings);
+    } catch (error) {
+      console.warn('Failed to initialize email service:', error);
     }
+    
+    // Validate license without blocking core app startup.
+    try {
+      const licenseResult = await validateLicenseOnStartup();
+      if (!licenseResult || licenseResult.valid === false) {
+        console.log('License validation failed');
+      }
+    } catch (error) {
+      console.warn('License validation failed during startup:', error);
+    }
+    
+    // Create main window
+    await createWindow();
+
+    // Register IPC handlers immediately after window creation so renderer actions
+    // don't fail if optional subsystems (tray/scheduler/updater) fail.
+    registerIpcHandlers(mainWindow);
+    
+    // Create system tray
+    try {
+      tray = createTray(mainWindow);
+    } catch (error) {
+      console.warn('Failed to create tray:', error);
+    }
+    
+    // Initialize scheduler
+    try {
+      await initScheduler(mainWindow);
+    } catch (error) {
+      console.warn('Failed to initialize scheduler:', error);
+    }
+    
+    // Initialize auto-updater
+    try {
+      initUpdater(mainWindow);
+    } catch (error) {
+      console.warn('Failed to initialize updater:', error);
+    }
+    
+    // Set auto-start on boot
+    const startOnBoot = parseBoolean(getSetting('start_on_boot'), true);
+    app.setLoginItemSettings({
+      openAtLogin: startOnBoot,
+      path: app.getPath('exe')
+    });
   } catch (error) {
-    console.warn('Failed to initialize email service:', error);
+    console.error('Failed to initialize application:', error);
   }
-  
-  // Validate license
-  const licenseResult = await validateLicenseOnStartup();
-  if (!licenseResult || licenseResult.valid === false) {
-    console.log('License validation failed');
-  }
-  
-  // Create main window
-  await createWindow();
-  
-  // Create system tray
-  tray = createTray(mainWindow);
-  
-  // Register IPC handlers
-  registerIpcHandlers(mainWindow);
-  
-  // Initialize scheduler
-  await initScheduler(mainWindow);
-  
-  // Initialize auto-updater
-  initUpdater(mainWindow);
-  
-  // Set auto-start on boot
-  const startOnBoot = parseBoolean(getSetting('start_on_boot'), true);
-  app.setLoginItemSettings({
-    openAtLogin: startOnBoot,
-    path: app.getPath('exe')
-  });
 });
 
 app.on('window-all-closed', (event) => {

@@ -25,6 +25,14 @@ const {
 
 let backupEngine = null;
 
+function registerHandler(channel, handler) {
+  // Allow safe re-registration when main process initialization is retried/reloaded.
+  if (typeof ipcMain.removeHandler === "function") {
+    ipcMain.removeHandler(channel);
+  }
+  ipcMain.handle(channel, handler);
+}
+
 function parseBoolean(value, defaultValue = false) {
   if (value === undefined || value === null) return defaultValue;
   if (typeof value === "boolean") return value;
@@ -174,7 +182,7 @@ async function runBackupWithProfileId(profileId, options = {}) {
 
 function registerIpcHandlers(mainWindow) {
   // Tally handlers
-  ipcMain.handle("tally:ping", async (_event, port) => {
+  registerHandler("tally:ping", async (_event, port) => {
     try {
       return await pingTally(port);
     } catch (error) {
@@ -182,7 +190,7 @@ function registerIpcHandlers(mainWindow) {
     }
   });
 
-  ipcMain.handle("tally:getCompanies", async (_event, port) => {
+  registerHandler("tally:getCompanies", async (_event, port) => {
     try {
       return await getCompanyList(port);
     } catch (error) {
@@ -191,7 +199,7 @@ function registerIpcHandlers(mainWindow) {
   });
 
   // Backup handlers
-  ipcMain.handle("backup:start", async (_event, profileId) => {
+  registerHandler("backup:start", async (_event, profileId) => {
     try {
       const result = await runBackupWithProfileId(profileId);
       mainWindow.webContents.send("backup:complete", result);
@@ -202,7 +210,7 @@ function registerIpcHandlers(mainWindow) {
     }
   });
 
-  ipcMain.handle("backup:manual", async (_event, options = {}) => {
+  registerHandler("backup:manual", async (_event, options = {}) => {
     try {
       const profileId = options.profileId || options.id;
       if (!profileId) {
@@ -218,7 +226,7 @@ function registerIpcHandlers(mainWindow) {
     }
   });
 
-  ipcMain.handle("backup:estimate", async (_event, profile = {}) => {
+  registerHandler("backup:estimate", async (_event, profile = {}) => {
     try {
       return await estimateBackupSize(profile);
     } catch (error) {
@@ -226,50 +234,50 @@ function registerIpcHandlers(mainWindow) {
     }
   });
 
-  ipcMain.handle("runs:getAll", async (_event, limit = 200) => {
+  registerHandler("runs:getAll", async (_event, limit = 200) => {
     return getBackupRuns(limit);
   });
 
   // Google Drive handlers
-  ipcMain.handle("drive:status", async () => {
+  registerHandler("drive:status", async () => {
     return getGoogleDriveStatus();
   });
 
-  ipcMain.handle("drive:connect", async () => {
+  registerHandler("drive:connect", async () => {
     return connectGoogleDrive();
   });
 
-  ipcMain.handle("drive:disconnect", async () => {
+  registerHandler("drive:disconnect", async () => {
     return disconnectGoogleDrive();
   });
 
   // Profile handlers
-  ipcMain.handle("profiles:getAll", async () => getAllBackupProfiles());
+  registerHandler("profiles:getAll", async () => getAllBackupProfiles());
 
-  ipcMain.handle("profiles:create", async (_event, profile) => {
+  registerHandler("profiles:create", async (_event, profile) => {
     const { createBackupProfile } = require("./db/queries");
     return createBackupProfile(profile);
   });
 
-  ipcMain.handle("profiles:update", async (_event, id, updates) => {
+  registerHandler("profiles:update", async (_event, id, updates) => {
     const { updateBackupProfile } = require("./db/queries");
     return updateBackupProfile(id, updates);
   });
 
-  ipcMain.handle("profiles:delete", async (_event, id) => {
+  registerHandler("profiles:delete", async (_event, id) => {
     const { deleteBackupProfile } = require("./db/queries");
     return deleteBackupProfile(id);
   });
 
   // Restore / export handlers
-  ipcMain.handle("restore:openInFolder", async (_event, filePath) => {
+  registerHandler("restore:openInFolder", async (_event, filePath) => {
     const target = String(filePath || "").trim();
     if (!target) throw new Error("filePath is required.");
     shell.showItemInFolder(path.normalize(target));
     return { success: true };
   });
 
-  ipcMain.handle("restore:exportCsv", async (_event, rows = [], options = {}) => {
+  registerHandler("restore:exportCsv", async (_event, rows = [], options = {}) => {
     const docsPath = app.getPath("documents");
     const exportDir = path.join(docsPath, "TallyBackupExports");
     await fs.mkdir(exportDir, { recursive: true });
@@ -287,9 +295,9 @@ function registerIpcHandlers(mainWindow) {
   });
 
   // Settings handlers
-  ipcMain.handle("settings:get", async () => mapSettingsFromStore());
+  registerHandler("settings:get", async () => mapSettingsFromStore());
 
-  ipcMain.handle("settings:update", async (_event, settings) => {
+  registerHandler("settings:update", async (_event, settings) => {
     const normalized = normalizeSettingsPayload(settings);
     Object.entries(normalized).forEach(([key, value]) => {
       setSetting(key, value);
@@ -304,7 +312,7 @@ function registerIpcHandlers(mainWindow) {
   });
 
   // Email handlers
-  ipcMain.handle("email:saveSettings", async (_event, emailSettings) => {
+  registerHandler("email:saveSettings", async (_event, emailSettings) => {
     try {
       const emailService = require("./services/email-service");
       
@@ -343,7 +351,7 @@ function registerIpcHandlers(mainWindow) {
     }
   });
 
-  ipcMain.handle("email:testSend", async (_event, toEmail) => {
+  registerHandler("email:testSend", async (_event, toEmail) => {
     try {
       const emailService = require("./services/email-service");
       
@@ -364,7 +372,7 @@ function registerIpcHandlers(mainWindow) {
     }
   });
 
-  ipcMain.handle("email:getSettings", async () => {
+  registerHandler("email:getSettings", async () => {
     try {
       const storedSettings = await getSetting("emailSettings");
       if (!storedSettings) {
@@ -403,19 +411,19 @@ function registerIpcHandlers(mainWindow) {
   });
 
   // License handlers
-  ipcMain.handle("license:validate", async (_event, licenseKey) => {
+  registerHandler("license:validate", async (_event, licenseKey) => {
     return validateLicense(licenseKey);
   });
 
-  ipcMain.handle("license:revalidate", async () => {
+  registerHandler("license:revalidate", async () => {
     return revalidateLicenseOnServer();
   });
 
-  ipcMain.handle("license:validateOnStartup", async () => {
+  registerHandler("license:validateOnStartup", async () => {
     return validateLicenseOnStartup();
   });
 
-  ipcMain.handle("license:status", async () => {
+  registerHandler("license:status", async () => {
     return getLicenseStatus();
   });
 }
