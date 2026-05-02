@@ -1,0 +1,110 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        node-version: [18.x]
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer
+        run: npm run build:renderer
+
+      - name: Build & sign application
+        run: npm run build:prod
+        env:
+          # Code signing (set in GitHub secrets)
+          CERTIFICATE_FILE: ${{ secrets.CERTIFICATE_FILE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.CERTIFICATE_PASSWORD }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create release notes
+        id: release_notes
+        run: |
+          $version = "${{ github.ref }}".Replace("refs/tags/", "")
+          $body = @"
+          ## 🚀 Release $version
+          
+          ### ✨ Features
+          - Improved OTA update mechanism
+          - Enhanced security features
+          - Performance optimizations
+          
+          ### 🐛 Bug Fixes
+          - Various stability improvements
+          
+          ### 📦 Installation
+          - Download Windows Installer below
+          - Extract portable version if preferred
+          - Application will auto-update future releases
+          
+          ### ℹ️ Release Information
+          - **Version**: $version
+          - **Date**: $(Get-Date -Format 'yyyy-MM-dd')
+          - **Auto-Update**: ✅ Enabled
+          
+          For detailed changelog, see git history.
+          "@
+          echo "RELEASE_BODY=$body" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Verify build artifacts
+        run: |
+          $distDir = "dist"
+          if (Test-Path $distDir) {
+            Write-Host "✅ Build artifacts found:"
+            Get-ChildItem -Path $distDir -Recurse | ForEach-Object { Write-Host "  - $($_.FullName)" }
+          } else {
+            Write-Error "❌ Build artifacts directory not found"
+            exit 1
+          }
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          body: ${{ env.RELEASE_BODY }}
+          files: dist/**/*.{exe,nsis}
+          draft: false
+          prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'dev') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notify Slack (on success)
+        if: success()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": "✅ TallyBackup Pro ${{ github.ref }} released successfully"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Notify Slack (on failure)
+        if: failure()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": "❌ TallyBackup Pro release failed: ${{ github.ref }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

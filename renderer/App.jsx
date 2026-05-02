@@ -6,6 +6,7 @@ import ModernManualBackup from './screens/ModernManualBackup';
 import ModernGoogleDrive from './screens/ModernGoogleDrive';
 import ModernRestore from './screens/ModernRestore';
 import ModernSettings from './screens/ModernSettings';
+import UpdateNotification from './components/UpdateNotification';
 import { useIPC } from './hooks/useElectron';
 import { useAppStore } from './store';
 import ModernLayout from './components/ModernLayout';
@@ -61,8 +62,11 @@ export default function App() {
   }, [invoke, setBackupProfiles, setGdriveStatus, updateSettings]);
 
   return (
-    <ModernLayout activeTab={activeTab} onTabChange={setActiveTab}>
-      {renderScreen(activeTab)}
-    </ModernLayout>
+    <>
+      <ModernLayout activeTab={activeTab} onTabChange={setActiveTab}>
+        {renderScreen(activeTab)}
+      </ModernLayout>
+      <UpdateNotification />
+    </>
   );
 }

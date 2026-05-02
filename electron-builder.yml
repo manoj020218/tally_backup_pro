@@ -1,13 +1,25 @@
 appId: com.tallybackup.pro
 productName: Tally Backup Pro
+
+# Publishing configuration for GitHub releases
+publish:
+  - provider: github
+    owner: manoj020218
+    repo: tally_backup_pro
+    # Release names: v1.0.0 (stable), v1.0.0-beta.1 (beta), v1.0.0-dev (dev)
+    # Update channel is set at build time via --publish flag
+    releaseType: release
+
 directories:
   buildResources: assets
   output: dist
+
 files:
   - main/**/*
   - renderer/dist/**/*
   - package.json
   - node_modules/**/*
+
 extraResources:
   - from: assets/
     to: assets/
@@ -17,6 +29,9 @@ win:
     - nsis
     - portable
   icon: assets/icon.ico
+  # Code signing certificate path (set during CI/CD)
+  # certificateFile: path/to/certificate.pfx
+  # certificatePassword: ${env.CERTIFICATE_PASSWORD}
 
 nsis:
   oneClick: false
@@ -26,3 +41,7 @@ nsis:
   runAfterFinish: true
   installerIcon: assets/installer-icon.ico
   uninstallerIcon: assets/installer-icon.ico
+  # Enable auto-update notifications in installer
+  installerHeaderIcon: assets/installer-icon.ico
+  # Custom installer messages
+  installerSidebar: assets/installer-icon.ico

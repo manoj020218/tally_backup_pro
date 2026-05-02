@@ -469,6 +469,34 @@ function registerIpcHandlers(mainWindow) {
   registerHandler("license:status", async () => {
     return getLicenseStatus();
   });
+
+  // Update handlers
+  registerHandler("update:checkNow", async () => {
+    const updater = require("./updater-config");
+    try {
+      await updater.checkForUpdates();
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  registerHandler("update:getStatus", async () => {
+    const updater = require("./updater-config");
+    return updater.getStatus();
+  });
+
+  registerHandler("update:setChannel", async (_event, channel) => {
+    const updater = require("./updater-config");
+    const success = updater.setUpdateChannel(channel);
+    return { success, channel: updater.getUpdateChannel() };
+  });
+
+  registerHandler("update:install", async () => {
+    const updater = require("./updater-config");
+    updater.installUpdate();
+    return { success: true };
+  });
 }
 
 module.exports = { registerIpcHandlers };

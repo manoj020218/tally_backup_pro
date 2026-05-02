@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAppStore } from '../store';
 import ModernInput from '../components/ModernInput';
 import { EmailConfigForm } from '../components/EmailConfigForm';
+import UpdateSettings from '../components/UpdateSettings';
 
 export default function ModernSettings() {
   const { settings, updateSettings } = useAppStore();
@@ -280,6 +281,9 @@ export default function ModernSettings() {
           </h3>
           <EmailConfigForm />
         </div>
+
+        {/* Update Settings */}
+        <UpdateSettings />
 
         {/* Developer Settings */}
         <div className="card slide-up">

@@ -1,52 +1,31 @@
-const { app, dialog } = require('electron');
-const { getSetting } = require('./db/queries');
+const { app } = require('electron');
+const logger = require('winston').default;
 
-function resolveUpdateChannel() {
-  const raw = String(getSetting('update_channel') || 'stable').trim().toLowerCase();
-  if (['stable', 'beta', 'hotfix'].includes(raw)) {
-    return raw;
-  }
-  return 'stable';
-}
-
+/**
+ * Initialize the auto-updater using the new AppUpdater class
+ * This replaces the older updater logic with the new modular approach
+ */
 function initUpdater(mainWindow) {
-  if (!app || !app.isPackaged) {
-    console.log('Auto-updater skipped (development/unpackaged mode)');
+  // Skip in development/unpackaged mode
+  if (!app.isPackaged) {
+    logger.info('Auto-updater skipped (development/unpackaged mode)');
     return;
   }
 
   try {
-    const { autoUpdater } = require('electron-updater');
-    const channel = resolveUpdateChannel();
-    autoUpdater.channel = channel;
-    autoUpdater.allowPrerelease = channel !== 'stable';
-    autoUpdater.checkForUpdatesAndNotify();
-
-    autoUpdater.on('update-available', () => {
-      dialog.showMessageBox(mainWindow, {
-        type: 'info',
-        title: 'Update Available',
-        message: `A new ${channel} update is available for TallyBackup Pro.`,
-        buttons: ['Install', 'Later']
-      }).then(result => {
-        if (result.response === 0) {
-          autoUpdater.downloadUpdate();
-        }
-      });
-    });
-
-    autoUpdater.on('update-downloaded', () => {
-      autoUpdater.quitAndInstall();
-    });
-
-    autoUpdater.on('error', (error) => {
-      console.error('Auto-update error:', error);
-    });
-
-    console.log(`Auto-updater initialized on channel: ${channel}`);
+    const appUpdater = require('./updater-config');
+    
+    // Set main window reference for notifications
+    appUpdater.setMainWindow(mainWindow);
+    
+    // Initialize the updater
+    appUpdater.initialize();
+    
+    logger.info('Auto-updater initialized successfully');
   } catch (error) {
-    console.error('Failed to initialize updater:', error);
+    logger.error('Failed to initialize auto-updater:', error);
   }
 }
 
 module.exports = { initUpdater };
+
